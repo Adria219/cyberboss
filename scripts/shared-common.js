@@ -114,7 +114,8 @@ function spawnDetachedCommand(command, args, { logFile, cwd = rootDir, env = {} 
     env: { ...process.env, ...env },
     detached: true,
     stdio: ["ignore", stdoutFd, stderrFd],
-    shell: process.platform === "win32",
+    shell: false,
+    windowsHide: true,
   });
   child.unref();
   return child.pid;
@@ -147,7 +148,8 @@ async function ensureSharedAppServer() {
         : "");
   }
 
-  const command = process.env.CYBERBOSS_CODEX_COMMAND || "codex";
+  const codexEntry = normalizeText(process.env.CYBERBOSS_CODEX_ENTRY);
+  const command = codexEntry ? process.execPath : (process.env.CYBERBOSS_CODEX_COMMAND || "codex");
   const mcpConfigArgs = buildCodexMcpConfigArgs(resolveCodexProjectToolMcpServerConfig({
     cyberbossHome: process.env.CYBERBOSS_HOME || rootDir,
   }));
@@ -158,6 +160,7 @@ async function ensureSharedAppServer() {
     autoApproveTools: readListEnv("CYBERBOSS_MOON_MCP_AUTO_APPROVE_TOOLS"),
   });
   const pid = spawnDetachedCommand(command, [
+    ...(codexEntry ? [codexEntry] : []),
     ...mcpConfigArgs,
     ...moonMcpConfigArgs,
     "app-server",
