@@ -8,7 +8,6 @@ const { persistIncomingWeixinAttachments } = require("../adapters/channel/weixin
 const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
 const { createClaudeCodeRuntimeAdapter } = require("../adapters/runtime/claudecode");
 const { findModelByQuery } = require("../adapters/runtime/codex/model-catalog");
-const { createTimelineIntegration } = require("../integrations/timeline");
 const {
   assembleRuntimeTurnText,
   buildInboundDraft,
@@ -41,7 +40,6 @@ const {
   splitCommandLine,
 } = require("../adapters/runtime/shared/approval-command");
 const { runSystemCheckinPoller } = require("../app/system-checkin-poller");
-const { createProjectTooling } = require("../tools/create-project-tooling");
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MIN_LONG_POLL_TIMEOUT_MS = 2_000;
 const SESSION_EXPIRED_ERRCODE = -14;
@@ -58,18 +56,41 @@ function createRuntimeAdapter(config) {
   return createCodexRuntimeAdapter(config);
 }
 
+function createDisabledTimelineIntegration() {
+  return {
+    describe() {
+      return {
+        id: "disabled",
+        kind: "integration",
+      };
+    },
+    async runSubcommand() {
+      throw new Error("CyberBoss project tools are disabled.");
+    },
+  };
+}
+
 class CyberbossApp {
   constructor(config) {
     this.config = config;
     this.channelAdapter = createWeixinChannelAdapter(config);
-    this.timelineIntegration = createTimelineIntegration(config);
-    const projectTooling = createProjectTooling(config, {
-      channelAdapter: this.channelAdapter,
-      timelineIntegration: this.timelineIntegration,
-    });
-    this.projectServices = projectTooling.services;
-    this.projectToolHost = projectTooling.toolHost;
-    this.runtimeContextStore = projectTooling.runtimeContextStore;
+    if (config.enableProjectTools) {
+      const { createTimelineIntegration } = require("../integrations/timeline");
+      const { createProjectTooling } = require("../tools/create-project-tooling");
+      this.timelineIntegration = createTimelineIntegration(config);
+      const projectTooling = createProjectTooling(config, {
+        channelAdapter: this.channelAdapter,
+        timelineIntegration: this.timelineIntegration,
+      });
+      this.projectServices = projectTooling.services;
+      this.projectToolHost = projectTooling.toolHost;
+      this.runtimeContextStore = projectTooling.runtimeContextStore;
+    } else {
+      this.timelineIntegration = createDisabledTimelineIntegration();
+      this.projectServices = {};
+      this.projectToolHost = null;
+      this.runtimeContextStore = null;
+    }
     this.runtimeAdapter = createRuntimeAdapter(config);
     this.threadStateStore = new ThreadStateStore();
     this.systemMessageQueue = new SystemMessageQueueStore({ filePath: config.systemMessageQueueFile });
@@ -298,6 +319,9 @@ class CyberbossApp {
     sidePadding = undefined,
     locale = "",
   } = {}) {
+    if (!this.projectServices?.timeline) {
+      throw new Error("CyberBoss project tools are disabled.");
+    }
     return this.projectServices.timeline.queueScreenshot({
       userId: senderId,
       outputFile,
@@ -316,6 +340,9 @@ class CyberbossApp {
   }
 
   async sendLocalFileToCurrentChat({ senderId = "", filePath = "" } = {}) {
+    if (!this.projectServices?.channelFile) {
+      throw new Error("CyberBoss project tools are disabled.");
+    }
     return this.projectServices.channelFile.sendToCurrentChat({
       userId: senderId,
       filePath,
@@ -325,6 +352,15 @@ class CyberbossApp {
   async handleIncomingMessage(message) {
     const normalized = this.channelAdapter.normalizeIncomingMessage(message);
     if (!normalized) {
+      return;
+    }
+    const allowedUserIds = Array.isArray(this.config.allowedUserIds)
+      ? this.config.allowedUserIds.map((value) => normalizeCommandArgument(value)).filter(Boolean)
+      : [];
+    if (!allowedUserIds.includes(normalizeCommandArgument(normalized.senderId))) {
+      if (this.config.discoverUserIds) {
+        console.log(`[cyberboss] observed senderId=${normalized.senderId}; message ignored until allowlisted.`);
+      }
       return;
     }
 
@@ -842,6 +878,9 @@ class CyberbossApp {
   }
 
   async flushPendingTimelineScreenshots(account) {
+    if (!this.projectServices?.timeline) {
+      return;
+    }
     const pendingJobs = this.timelineScreenshotQueue.drainForAccount(account.accountId);
     for (const job of pendingJobs) {
       try {

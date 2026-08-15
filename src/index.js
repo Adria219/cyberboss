@@ -9,7 +9,6 @@ const { CyberbossApp } = require("./core/app");
 const { runSystemCheckinPoller } = require("./app/system-checkin-poller");
 const { buildTerminalHelpText } = require("./core/command-registry");
 const { ensureStickerCatalogFilesSync } = require("./services/sticker-service");
-const { createProjectTooling } = require("./tools/create-project-tooling");
 const { runToolMcpServer } = require("./tools/mcp-stdio-server");
 
 function ensureDefaultStateDirectory() {
@@ -134,6 +133,10 @@ async function main() {
   }
 
   if (command === "tool-mcp-server") {
+    if (!config.enableProjectTools) {
+      throw new Error("CyberBoss project tools are disabled. Set CYBERBOSS_ENABLE_PROJECT_TOOLS=true to enable them.");
+    }
+    const { createProjectTooling } = require("./tools/create-project-tooling");
     const runtimeId = readFlagValue(argv.slice(1), "--runtime-id") || "";
     const workspaceRoot = readFlagValue(argv.slice(1), "--workspace-root") || process.cwd();
     const { toolHost } = createProjectTooling(config);

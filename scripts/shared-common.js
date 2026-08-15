@@ -5,6 +5,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 const {
   buildCodexMcpConfigArgs,
+  buildRemoteMcpConfigArgs,
   resolveCodexProjectToolMcpServerConfig,
 } = require("../src/adapters/runtime/codex/mcp-config");
 
@@ -150,7 +151,19 @@ async function ensureSharedAppServer() {
   const mcpConfigArgs = buildCodexMcpConfigArgs(resolveCodexProjectToolMcpServerConfig({
     cyberbossHome: process.env.CYBERBOSS_HOME || rootDir,
   }));
-  const pid = spawnDetachedCommand(command, [...mcpConfigArgs, "app-server", "--listen", listenUrl], {
+  const moonMcpConfigArgs = buildRemoteMcpConfigArgs({
+    name: "moon_memory_cyberboss",
+    url: process.env.CYBERBOSS_MOON_MCP_URL,
+    bearerTokenEnvVar: process.env.CYBERBOSS_MOON_MCP_TOKEN_ENV_VAR,
+    autoApproveTools: readListEnv("CYBERBOSS_MOON_MCP_AUTO_APPROVE_TOOLS"),
+  });
+  const pid = spawnDetachedCommand(command, [
+    ...mcpConfigArgs,
+    ...moonMcpConfigArgs,
+    "app-server",
+    "--listen",
+    listenUrl,
+  ], {
     logFile: appServerLogFile,
     env,
   });
@@ -259,6 +272,13 @@ function parseTimestamp(value) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function readListEnv(name) {
+  return String(process.env[name] || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 function sleep(ms) {

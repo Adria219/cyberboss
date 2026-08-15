@@ -6,6 +6,39 @@ const path = require("path");
 
 const { CyberbossApp } = require("../src/core/app");
 
+test("WeChat inbound fails closed until the sender is explicitly allowlisted", async () => {
+  let handled = 0;
+  const appLike = {
+    config: {
+      allowedUserIds: [],
+      discoverUserIds: false,
+    },
+    channelAdapter: {
+      normalizeIncomingMessage() {
+        return { senderId: "user-1", text: "fictional hello" };
+      },
+    },
+    primeDeferredRepliesForSender() {
+      throw new Error("blocked senders must not reach context persistence");
+    },
+    async handlePreparedMessage() {
+      handled += 1;
+    },
+  };
+
+  await CyberbossApp.prototype.handleIncomingMessage.call(appLike, {});
+  assert.equal(handled, 0);
+
+  appLike.config.allowedUserIds = ["other-user"];
+  await CyberbossApp.prototype.handleIncomingMessage.call(appLike, {});
+  assert.equal(handled, 0);
+
+  appLike.config.allowedUserIds = ["user-1"];
+  appLike.primeDeferredRepliesForSender = () => {};
+  await CyberbossApp.prototype.handleIncomingMessage.call(appLike, {});
+  assert.equal(handled, 1);
+});
+
 test("system messages bypass normal inbound wrapping", async () => {
   const prepared = await CyberbossApp.prototype.prepareIncomingMessageForRuntime.call({}, {
     provider: "system",

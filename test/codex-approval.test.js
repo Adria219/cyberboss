@@ -3,9 +3,13 @@ const assert = require("node:assert/strict");
 
 const { CyberbossApp } = require("../src/core/app");
 const { mapCodexMessageToRuntimeEvent } = require("../src/adapters/runtime/codex/events");
-const { buildCodexMcpConfigArgs } = require("../src/adapters/runtime/codex/mcp-config");
+const {
+  buildCodexMcpConfigArgs,
+  buildRemoteMcpConfigArgs,
+  resolveCodexProjectToolMcpServerConfig,
+} = require("../src/adapters/runtime/codex/mcp-config");
 
-test("codex MCP config auto-approves cyberboss tools", () => {
+test("codex MCP config only auto-approves explicitly selected cyberboss tools", () => {
   const args = buildCodexMcpConfigArgs({
     name: "cyberboss_tools",
     command: "/usr/bin/node",
@@ -18,22 +22,48 @@ test("codex MCP config auto-approves cyberboss tools", () => {
     "-c",
     "mcp_servers.cyberboss_tools.args=[\"/workspace/bin/cyberboss.js\",\"tool-mcp-server\"]",
   ]);
+  assert.doesNotMatch(args.join("\n"), /approval_mode/);
+
+  const selected = buildCodexMcpConfigArgs({
+    name: "cyberboss_tools",
+    command: "/usr/bin/node",
+    args: ["/workspace/bin/cyberboss.js", "tool-mcp-server"],
+  }, {
+    autoApproveTools: ["cyberboss_reminder_create"],
+  });
   assert.match(
-    args.join("\n"),
-    /mcp_servers\.cyberboss_tools\.tools\.cyberboss_channel_send_file\.approval_mode="auto"/
-  );
-  assert.match(
-    args.join("\n"),
+    selected.join("\n"),
     /mcp_servers\.cyberboss_tools\.tools\.cyberboss_reminder_create\.approval_mode="auto"/
   );
-  assert.match(
-    args.join("\n"),
-    /mcp_servers\.cyberboss_tools\.tools\.cyberboss_timeline_screenshot\.approval_mode="auto"/
+  assert.doesNotMatch(
+    selected.join("\n"),
+    /mcp_servers\.cyberboss_tools\.tools\.cyberboss_channel_send_file\.approval_mode="auto"/
   );
-  assert.match(
-    args.join("\n"),
-    /mcp_servers\.cyberboss_tools\.tools\.whereabouts_snapshot\.approval_mode="auto"/
-  );
+});
+
+test("cyberboss project tools are disabled unless explicitly enabled", () => {
+  const cyberbossHome = require("node:path").resolve(__dirname, "..");
+  assert.equal(resolveCodexProjectToolMcpServerConfig({ cyberbossHome, enabled: false }), null);
+  const enabled = resolveCodexProjectToolMcpServerConfig({ cyberbossHome, enabled: true });
+  assert.equal(enabled.name, "cyberboss_tools");
+});
+
+test("remote Moon MCP config uses an env-backed bearer token and explicit tool approvals", () => {
+  const args = buildRemoteMcpConfigArgs({
+    name: "moon_memory_cyberboss",
+    url: "https://example.invalid/api/mcp",
+    bearerTokenEnvVar: "MOON_CYBERBOSS_TOKEN",
+    autoApproveTools: ["moon_context", "append_activity"],
+  });
+  assert.deepEqual(args.slice(0, 4), [
+    "-c",
+    "mcp_servers.moon_memory_cyberboss.url=\"https://example.invalid/api/mcp\"",
+    "-c",
+    "mcp_servers.moon_memory_cyberboss.bearer_token_env_var=\"MOON_CYBERBOSS_TOKEN\"",
+  ]);
+  assert.match(args.join("\n"), /tools\.moon_context\.approval_mode="auto"/);
+  assert.match(args.join("\n"), /tools\.append_activity\.approval_mode="auto"/);
+  assert.doesNotMatch(args.join("\n"), /propose_memory/);
 });
 
 test("codex MCP elicitation approvals map to runtime approval events", () => {

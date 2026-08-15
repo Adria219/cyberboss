@@ -1,4 +1,3 @@
-const { WhereaboutsToolHost } = require("whereabouts-mcp");
 const {
   STICKER_DESC_GUIDANCE,
   STICKER_DESC_FIELD_DESCRIPTION,
@@ -546,16 +545,31 @@ const PROJECT_TOOLS = [
   },
 ];
 
-const STATIC_EXTRA_TOOL_NAMES = new WhereaboutsToolHost({ service: null })
-  .listTools()
-  .map((tool) => tool.name);
+const OptionalWhereaboutsToolHost = loadWhereaboutsToolHost();
+const STATIC_EXTRA_TOOL_NAMES = OptionalWhereaboutsToolHost
+  ? new OptionalWhereaboutsToolHost({ service: null }).listTools().map((tool) => tool.name)
+  : [];
 
 function createExtraToolHosts(services = {}) {
   const hosts = [];
   if (services.whereabouts) {
-    hosts.push(new WhereaboutsToolHost({ service: services.whereabouts }));
+    if (!OptionalWhereaboutsToolHost) {
+      throw new Error("whereabouts-mcp is required when CyberBoss project tools are enabled.");
+    }
+    hosts.push(new OptionalWhereaboutsToolHost({ service: services.whereabouts }));
   }
   return hosts;
+}
+
+function loadWhereaboutsToolHost() {
+  try {
+    return require("whereabouts-mcp").WhereaboutsToolHost;
+  } catch (error) {
+    if (error?.code === "MODULE_NOT_FOUND" && String(error?.message || "").includes("whereabouts-mcp")) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 function normalizeText(value) {

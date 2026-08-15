@@ -1,4 +1,6 @@
 node_modules/
+.runtime/
+private/
 .DS_Store
 .env
 .mcp.json
