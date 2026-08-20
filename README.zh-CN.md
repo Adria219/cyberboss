@@ -214,6 +214,8 @@ CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT=100
   设置微信短分片合并阈值默认值。
 - `CYBERBOSS_WEIXIN_BASE_URL`、`CYBERBOSS_WEIXIN_CDN_BASE_URL`、`CYBERBOSS_WEIXIN_QR_BOT_TYPE`
   在特殊部署环境下覆盖微信桥接接口地址和二维码 bot 类型。
+- `CYBERBOSS_AGENT_ROOM_URL`
+  本机 Agent Room 地址，默认 `http://127.0.0.1:5178`；只接受 HTTP 回环地址，不支持公网转发。
 - `CYBERBOSS_ENABLE_LOCATION_SERVER`
   是否启动内置 whereabouts HTTP 接收服务。
 - `CYBERBOSS_LOCATION_HOST`
@@ -297,6 +299,8 @@ model_catalog_json = "/绝对路径/.codex/local-models.json"
   绑定当前聊天使用的项目目录
 - `/status`
   查看当前绑定项目、线程、模型和上下文状态
+- `/room <工单>`、`/room status`、`/room stop`
+  从微信向本机 Agent Room 派单、查看有限轮守候进度或停止守候。该命令不经过模型，也不开放审批能力。
 - `/new`
   切到新线程草稿
 - `/reread`

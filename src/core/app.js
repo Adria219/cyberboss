@@ -18,6 +18,7 @@ const {
   takeImageOnlyBatchMessages,
 } = require("./inbound-turn");
 const { resolveVisionContext } = require("../services/vision-context");
+const { AgentRoomService, formatAgentRoomStatus } = require("../services/agent-room-service");
 const {
   buildWeixinHelpText,
 } = require("./command-registry");
@@ -92,6 +93,7 @@ class CyberbossApp {
       this.runtimeContextStore = null;
     }
     this.runtimeAdapter = createRuntimeAdapter(config);
+    this.agentRoomService = new AgentRoomService({ baseUrl: config.agentRoomUrl });
     this.threadStateStore = new ThreadStateStore();
     this.systemMessageQueue = new SystemMessageQueueStore({ filePath: config.systemMessageQueueFile });
     this.deferredSystemReplyQueue = new DeferredSystemReplyStore({ filePath: config.deferredSystemReplyQueueFile });
@@ -996,6 +998,9 @@ class CyberbossApp {
       case "status":
         await this.handleStatusCommand(normalized);
         return;
+      case "room":
+        await this.handleRoomCommand(normalized, command);
+        return;
       case "new":
         await this.handleNewCommand(normalized);
         return;
@@ -1130,6 +1135,53 @@ class CyberbossApp {
       text: lines.join("\n"),
       contextToken: normalized.contextToken,
     });
+  }
+
+  async handleRoomCommand(normalized, command) {
+    const args = String(command?.args || "").trim();
+    if (!args) {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: "用法：\n/room <工单>\n/room status\n/room stop",
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+    try {
+      if (args.toLowerCase() === "status") {
+        const state = await this.agentRoomService.getState();
+        await this.channelAdapter.sendText({
+          userId: normalized.senderId,
+          text: formatAgentRoomStatus(state),
+          contextToken: normalized.contextToken,
+          preserveBlock: true,
+        });
+        return;
+      }
+      if (args.toLowerCase() === "stop") {
+        const result = await this.agentRoomService.stop();
+        await this.channelAdapter.sendText({
+          userId: normalized.senderId,
+          text: result.stopped ? "Agent Room 守候已停止" : "Agent Room 当前没有进行中的守候",
+          contextToken: normalized.contextToken,
+        });
+        return;
+      }
+      const idempotencyKey = buildAgentRoomIdempotencyKey(normalized, args);
+      const result = await this.agentRoomService.submitTask({ text: args, idempotencyKey });
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: `已送入 Agent Room\n守候：第 ${result.summon.currentRound}/${result.summon.maxRounds} 轮\n可用 /room status 查看进度`,
+        contextToken: normalized.contextToken,
+      });
+    } catch (error) {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: `Agent Room 操作失败\n${error instanceof Error ? error.message : String(error || "unknown error")}`,
+        contextToken: normalized.contextToken,
+        preserveBlock: true,
+      }).catch(() => {});
+    }
   }
 
   async handleNewCommand(normalized) {
@@ -1914,6 +1966,16 @@ function parseChannelCommand(text) {
     name,
     args: rest.join(" ").trim(),
   };
+}
+
+function buildAgentRoomIdempotencyKey(normalized, task) {
+  const basis = [
+    normalized?.accountId,
+    normalized?.senderId,
+    normalized?.messageId,
+    task,
+  ].map((value) => String(value || "")).join("|");
+  return `wechat-room-${crypto.createHash("sha256").update(basis).digest("hex").slice(0, 40)}`;
 }
 
 function normalizeCommandName(value) {

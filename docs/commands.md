@@ -93,6 +93,9 @@ Notes:
 
 - `/bind`
 - `/status`
+- `/room <task>`
+- `/room status`
+- `/room stop`
 - `/new`
 - `/reread`
 - `/compact`
@@ -111,6 +114,7 @@ Notes:
 Notes:
 
 - `/status` covers thread, workspace, and context details
+- `/room` talks only to a loopback Agent Room endpoint and never grants approval rights
 - there is no separate `/context` command; use `/status` and read the `📦 context` line
 - `/compact` asks the current thread to compact its context and reports start / finish back to WeChat
 - file sending is still available, but no longer exposed as a WeChat command

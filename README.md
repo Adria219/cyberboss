@@ -209,6 +209,8 @@ What these do:
   Set the default minimum merge size for short WeChat reply chunks.
 - `CYBERBOSS_WEIXIN_BASE_URL`, `CYBERBOSS_WEIXIN_CDN_BASE_URL`, `CYBERBOSS_WEIXIN_QR_BOT_TYPE`
   Override the WeChat bridge endpoints and QR bot type when your deployment needs it.
+- `CYBERBOSS_AGENT_ROOM_URL`
+  Local Agent Room URL. Defaults to `http://127.0.0.1:5178` and only accepts loopback HTTP addresses.
 - `CYBERBOSS_ENABLE_LOCATION_SERVER`
   Enable the built-in whereabouts HTTP ingest server.
 - `CYBERBOSS_LOCATION_HOST`
@@ -289,6 +291,8 @@ Switch the runtime with `CYBERBOSS_RUNTIME`. You do not need a different command
   Bind the current chat to a project workspace
 - `/status`
   Show current workspace, thread, model, and context state
+- `/room <task>`, `/room status`, `/room stop`
+  Send a task to the local Agent Room, inspect its bounded watch, or stop it. These commands bypass the model and do not grant approval rights.
 - `/new`
   Move to a new thread draft
 - `/reread`

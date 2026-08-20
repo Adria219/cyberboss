@@ -87,6 +87,13 @@ const COMMAND_GROUPS = [
         status: "active",
       },
       {
+        action: "agent_room.owner",
+        summary: "Send a task to Agent Room or inspect and stop its current watch",
+        terminal: [],
+        weixin: ["/room <task>", "/room status", "/room stop"],
+        status: "active",
+      },
+      {
         action: "thread.new",
         summary: "Switch to a fresh thread draft",
         terminal: [],
@@ -323,6 +330,7 @@ function actionEmoji(action) {
   switch (action.action) {
     case "workspace.bind": return "📍";
     case "workspace.status": return "📊";
+    case "agent_room.owner": return "🏠";
     case "thread.new": return "🆕";
     case "thread.reread": return "🔄";
     case "thread.compact": return "🗜️";

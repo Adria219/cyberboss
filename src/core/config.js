@@ -75,6 +75,7 @@ function readConfig() {
     visionApiKey: readTextEnv("CYBERBOSS_VISION_API_KEY"),
     visionModel: readTextEnv("CYBERBOSS_VISION_MODEL"),
     visionTimeoutMs: readIntEnv("CYBERBOSS_VISION_TIMEOUT_MS") || 30_000,
+    agentRoomUrl: readTextEnv("CYBERBOSS_AGENT_ROOM_URL") || "http://127.0.0.1:5178",
     claudeCommand: readTextEnv("CYBERBOSS_CLAUDE_COMMAND") || "claude",
     claudeModel: readTextEnv("CYBERBOSS_CLAUDE_MODEL") || "",
     claudeContextWindow: readIntEnv("CYBERBOSS_CLAUDE_CONTEXT_WINDOW"),

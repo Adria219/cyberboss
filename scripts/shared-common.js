@@ -92,7 +92,7 @@ function checkReadyz() {
   });
 }
 
-async function waitForReadyz({ attempts = 10, delayMs = 300 } = {}) {
+async function waitForReadyz({ attempts = 40, delayMs = 300 } = {}) {
   for (let index = 0; index < attempts; index += 1) {
     if (await checkReadyz()) {
       return true;
