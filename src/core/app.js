@@ -22,7 +22,13 @@ const { resolveVisionContext } = require("../services/vision-context");
 const {
   buildWeixinHelpText,
 } = require("./command-registry");
-const { CheckinConfigStore, parseCheckinRangeMinutes, resolveDefaultCheckinRange } = require("./checkin-config-store");
+const {
+  CheckinConfigStore,
+  isWithinQuietHours,
+  parseCheckinRangeMinutes,
+  parseQuietHours,
+  resolveDefaultCheckinRange,
+} = require("./checkin-config-store");
 const { resolvePreferredSenderId, resolvePreferredWorkspaceRoot } = require("./default-targets");
 const { StreamDelivery } = require("./stream-delivery");
 const { ThreadStateStore } = require("./thread-state-store");
@@ -87,6 +93,8 @@ class CyberbossApp {
       sessionStore: this.runtimeAdapter.getSessionStore(),
       runtimeId: this.runtimeAdapter.describe().id,
       onDeferredSystemReply: (payload) => this.deferSystemReply(payload),
+      shouldHoldSystemReply: ({ target }) => target?.systemKind === "checkin"
+        && isWithinQuietHours(new Date(), parseQuietHours(this.config.checkinQuietHours)),
     });
     this.pendingOperationByRunKey = new Map();
     this.runtimeEventChain = Promise.resolve();
@@ -464,6 +472,7 @@ class CyberbossApp {
         userId: prepared.senderId,
         contextToken: prepared.contextToken,
         provider: prepared.provider,
+        systemKind: prepared.systemKind,
       };
       if (turn.turnId) {
         this.streamDelivery.bindReplyTargetForTurn({
@@ -2255,6 +2264,8 @@ function parseNumericOrderValue(value) {
 const DEFERRED_REPLY_NOTICE = "由于微信 context_token 的限制，上轮对话里有一部分内容当时没能送达；这次用户再次发来消息、context_token 刷新后，先把遗留内容补上。如果这种情况反复出现，可发送 /chunk <数字>（例如 /chunk 50）调大最小合并字符数，减少消息分片。";
 const DEFERRED_PLAIN_REPLY_HEADER = "===== 上轮对话遗留内容 =====";
 const DEFERRED_SYSTEM_REPLY_HEADER = "===== 期间模型主动联系 =====";
+const PROACTIVE_NOTE_NOTICE = "你不在的时候，我有些话没有急着打扰你；现在你回来了，把它们一起带过来。";
+const PROACTIVE_NOTE_HEADER = "===== 未寄留言 =====";
 
 function formatDeferredSystemReplyText(text) {
   const normalized = String(text || "").trim();
@@ -2269,12 +2280,20 @@ function formatDeferredSystemReplyText(text) {
 
 function formatDeferredSystemReplyBatch(replies) {
   const grouped = groupDeferredReplies(replies);
-  if (!grouped.plain.length && !grouped.system.length) {
+  if (!grouped.plain.length && !grouped.system.length && !grouped.proactive.length) {
     return DEFERRED_REPLY_NOTICE;
   }
-  const parts = [
-    DEFERRED_REPLY_NOTICE,
-  ];
+  const hasDeliveryFailure = grouped.plain.length || grouped.system.length;
+  const parts = [];
+  if (hasDeliveryFailure) {
+    parts.push(DEFERRED_REPLY_NOTICE);
+  }
+  if (grouped.proactive.length) {
+    if (parts.length) {
+      parts.push("");
+    }
+    parts.push(PROACTIVE_NOTE_NOTICE, "", PROACTIVE_NOTE_HEADER, grouped.proactive.join("\n\n"));
+  }
   if (grouped.plain.length) {
     parts.push("", DEFERRED_PLAIN_REPLY_HEADER, grouped.plain.join("\n\n"));
   }
@@ -2285,7 +2304,7 @@ function formatDeferredSystemReplyBatch(replies) {
 }
 
 function groupDeferredReplies(replies) {
-  const grouped = { plain: [], system: [] };
+  const grouped = { plain: [], system: [], proactive: [] };
   for (const reply of Array.isArray(replies) ? replies : []) {
     const normalizedText = String(reply?.text || "").trim();
     if (!normalizedText) {
@@ -2293,6 +2312,10 @@ function groupDeferredReplies(replies) {
     }
     if (reply?.kind === "system_reply") {
       grouped.system.push(normalizedText);
+      continue;
+    }
+    if (reply?.kind === "proactive_note") {
+      grouped.proactive.push(normalizedText);
       continue;
     }
     grouped.plain.push(normalizedText);

@@ -3,12 +3,13 @@ const { sanitizeProtocolLeakText } = require("../adapters/runtime/codex/protocol
 const CURRENT_REPLY_HEADER = "===== 本轮模型回复 =====";
 
 class StreamDelivery {
-  constructor({ channelAdapter, sessionStore, runtimeId = "", onDeferredSystemReply, systemReplyRetryScheduleMs, sameTokenRetryDelayMs }) {
+  constructor({ channelAdapter, sessionStore, runtimeId = "", onDeferredSystemReply, shouldHoldSystemReply, systemReplyRetryScheduleMs, sameTokenRetryDelayMs }) {
     this.channelAdapter = channelAdapter;
     this.sessionStore = sessionStore;
     this.runtimeId = normalizeRuntimeId(runtimeId);
     this.systemReplyPolicy = createSystemReplyPolicy(this.runtimeId);
     this.onDeferredSystemReply = typeof onDeferredSystemReply === "function" ? onDeferredSystemReply : null;
+    this.shouldHoldSystemReply = typeof shouldHoldSystemReply === "function" ? shouldHoldSystemReply : null;
     this.systemReplyRetryScheduleMs = Array.isArray(systemReplyRetryScheduleMs) && systemReplyRetryScheduleMs.length
       ? systemReplyRetryScheduleMs.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value >= 0)
       : [1_500, 2_500, 4_000, 6_000];
@@ -31,6 +32,7 @@ class StreamDelivery {
       userId: String(target.userId).trim(),
       contextToken: String(target.contextToken).trim(),
       provider: normalizeText(target.provider),
+      systemKind: normalizeText(target.systemKind),
     });
   }
 
@@ -332,6 +334,19 @@ class StreamDelivery {
       return;
     }
 
+    if (resolved.kind === "leave_note" && state.replyTarget?.systemKind !== "checkin") {
+      console.error(`[cyberboss] leave_note rejected outside proactive check-in thread=${state.threadId}`);
+      return;
+    }
+
+    if (resolved.kind === "leave_note" || (resolved.kind === "send_message" && this.shouldHoldSystemMessage(state, resolved.message))) {
+      const held = await this.holdProactiveSystemReply(state, resolved.message);
+      if (held) {
+        this.markAllItemsSent(state);
+      }
+      return;
+    }
+
     if (resolved.kind !== "send_message") {
       console.error(
         `[cyberboss] invalid system reply thread=${state.threadId} reason=${resolved.reason} preview=${JSON.stringify(replyText.slice(0, 160))}`
@@ -347,6 +362,44 @@ class StreamDelivery {
     });
 
     await state.sendChain;
+  }
+
+  shouldHoldSystemMessage(state, message) {
+    if (!this.shouldHoldSystemReply || state?.replyTarget?.systemKind !== "checkin") {
+      return false;
+    }
+    try {
+      return Boolean(this.shouldHoldSystemReply({
+        threadId: state?.threadId || "",
+        target: state?.replyTarget || null,
+        message,
+      }));
+    } catch (error) {
+      console.error(`[cyberboss] proactive delivery gate failed closed thread=${state?.threadId || ""}: ${error.message}`);
+      return true;
+    }
+  }
+
+  async holdProactiveSystemReply(state, message) {
+    const target = state?.replyTarget || {};
+    if (!this.onDeferredSystemReply || !target.userId || !message) {
+      console.error(`[cyberboss] proactive note could not be stored thread=${state?.threadId || ""}`);
+      return false;
+    }
+    try {
+      await this.onDeferredSystemReply({
+        threadId: state.threadId,
+        userId: target.userId,
+        text: message,
+        error: null,
+        kind: "proactive_note",
+      });
+      console.log(`[cyberboss] proactive note stored locally thread=${state.threadId} user=${target.userId}`);
+      return true;
+    } catch (error) {
+      console.error(`[cyberboss] failed to store proactive note thread=${state.threadId}: ${error.message}`);
+      return false;
+    }
   }
 
   async sendReplyDelivery(state, delivery, { prependDeferredPrefix = false } = {}) {
@@ -484,6 +537,7 @@ class StreamDelivery {
       userId: currentTarget.userId,
       contextToken: refreshedContextToken,
       provider: currentTarget.provider,
+      systemKind: currentTarget.systemKind,
     };
   }
 
@@ -537,6 +591,7 @@ class StreamDelivery {
       userId: target.userId,
       contextToken: target.contextToken,
       provider: target.provider,
+      systemKind: target.systemKind,
     };
     state.threadReplyTargetAttached = true;
   }
@@ -699,6 +754,7 @@ function normalizeReplyTarget(target) {
     userId: String(target.userId).trim(),
     contextToken: String(target.contextToken).trim(),
     provider: normalizeText(target.provider),
+    systemKind: normalizeText(target.systemKind),
   };
 }
 
@@ -749,16 +805,16 @@ function resolveSystemReplyAction(candidate) {
   if (action === "silent") {
     return { kind: "silent" };
   }
-  if (action !== "send_message") {
+  if (!["send_message", "leave_note"].includes(action)) {
     return { kind: "invalid", reason: "unsupported action" };
   }
 
   const message = sanitizeProtocolLeakText(normalizeLineEndings(String(parsed.message || parsed.text || ""))).text.trim();
   if (!message) {
-    return { kind: "invalid", reason: "send_message requires a non-empty message" };
+    return { kind: "invalid", reason: `${action} requires a non-empty message` };
   }
 
-  return { kind: "send_message", message };
+  return { kind: action, message };
 }
 
 function normalizeSystemReplySource(replyText) {

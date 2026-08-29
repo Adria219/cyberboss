@@ -8,7 +8,7 @@ const DEFERRED_PLAIN_REPLY_HEADER = "===== 上轮对话遗留内容 =====";
 const DEFERRED_SYSTEM_REPLY_HEADER = "===== 期间模型主动联系 =====";
 const CURRENT_REPLY_HEADER = "===== 本轮模型回复 =====";
 
-function createHarness({ sendText, getKnownContextTokens, runtimeId = "" } = {}) {
+function createHarness({ sendText, getKnownContextTokens, runtimeId = "", onDeferredSystemReply, shouldHoldSystemReply } = {}) {
   const sent = [];
   const channelAdapter = {
     async sendText(payload) {
@@ -33,7 +33,13 @@ function createHarness({ sendText, getKnownContextTokens, runtimeId = "" } = {})
     },
   };
 
-  const streamDelivery = new StreamDelivery({ channelAdapter, sessionStore, runtimeId });
+  const streamDelivery = new StreamDelivery({
+    channelAdapter,
+    sessionStore,
+    runtimeId,
+    onDeferredSystemReply,
+    shouldHoldSystemReply,
+  });
   return { sent, streamDelivery, bindingByThreadId };
 }
 
@@ -79,6 +85,77 @@ test("system silent JSON is suppressed", async () => {
   });
 
   assert.deepEqual(sent, []);
+});
+
+test("system leave_note stores a local proactive note without sending", async () => {
+  const deferred = [];
+  const { sent, streamDelivery } = createHarness({
+    async onDeferredSystemReply(payload) {
+      deferred.push(payload);
+    },
+  });
+  streamDelivery.queueReplyTargetForThread("thread-note", {
+    userId: "user-note",
+    contextToken: "ctx-note",
+    provider: "system",
+    systemKind: "checkin",
+  });
+
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-note",
+    turnId: "turn-note",
+    itemId: "item-note",
+    text: "{\"action\":\"leave_note\",\"message\":\"醒了再给你看。\"}",
+  });
+
+  assert.deepEqual(sent, []);
+  assert.equal(deferred.length, 1);
+  assert.equal(deferred[0].text, "醒了再给你看。");
+  assert.equal(deferred[0].kind, "proactive_note");
+});
+
+test("quiet-hours gate holds only a proactive check-in send_message", async () => {
+  const deferred = [];
+  const { sent, streamDelivery } = createHarness({
+    shouldHoldSystemReply({ target }) {
+      return target.systemKind === "checkin";
+    },
+    async onDeferredSystemReply(payload) {
+      deferred.push(payload);
+    },
+  });
+  streamDelivery.queueReplyTargetForThread("thread-quiet", {
+    userId: "user-quiet",
+    contextToken: "ctx-quiet",
+    provider: "system",
+    systemKind: "checkin",
+  });
+
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-quiet",
+    turnId: "turn-quiet",
+    itemId: "item-quiet",
+    text: "{\"action\":\"send_message\",\"message\":\"本来想现在告诉你。\"}",
+  });
+
+  assert.deepEqual(sent, []);
+  assert.equal(deferred.length, 1);
+  assert.equal(deferred[0].text, "本来想现在告诉你。");
+
+  streamDelivery.queueReplyTargetForThread("thread-reminder", {
+    userId: "user-quiet",
+    contextToken: "ctx-quiet",
+    provider: "system",
+    systemKind: "system",
+  });
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-reminder",
+    turnId: "turn-reminder",
+    itemId: "item-reminder",
+    text: "{\"action\":\"send_message\",\"message\":\"该出门了。\"}",
+  });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].text, "该出门了。");
 });
 
 test("system send_message JSON sends only the message text", async () => {
