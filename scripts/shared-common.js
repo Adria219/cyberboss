@@ -91,7 +91,7 @@ function checkReadyz() {
   });
 }
 
-async function waitForReadyz({ attempts = 10, delayMs = 300 } = {}) {
+async function waitForReadyz({ attempts = 40, delayMs = 300 } = {}) {
   for (let index = 0; index < attempts; index += 1) {
     if (await checkReadyz()) {
       return true;
@@ -113,7 +113,8 @@ function spawnDetachedCommand(command, args, { logFile, cwd = rootDir, env = {} 
     env: { ...process.env, ...env },
     detached: true,
     stdio: ["ignore", stdoutFd, stderrFd],
-    shell: process.platform === "win32",
+    shell: false,
+    windowsHide: true,
   });
   child.unref();
   return child.pid;

@@ -32,7 +32,7 @@ async function main() {
     childEnv.CYBERBOSS_CODEX_ENDPOINT = listenUrl;
   }
 
-  const child = spawn(process.execPath, ["./bin/cyberboss.js", "start", "--checkin"], {
+  const child = spawn(process.execPath, ["./bin/cyberboss.js", "start"], {
     cwd: rootDir,
     env: childEnv,
     stdio: "inherit",
