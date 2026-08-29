@@ -8,7 +8,9 @@ const {
   CheckinConfigStore,
   DEFAULT_MIN_INTERVAL_MS,
   DEFAULT_MAX_INTERVAL_MS,
+  isWithinQuietHours,
   parseCheckinRangeMinutes,
+  parseQuietHours,
 } = require("../src/core/checkin-config-store");
 const { CyberbossApp } = require("../src/core/app");
 
@@ -22,6 +24,17 @@ test("parseCheckinRangeMinutes accepts min-max minute ranges", () => {
   assert.deepEqual(parseCheckinRangeMinutes("5 - 10"), { minMinutes: 5, maxMinutes: 10 });
   assert.equal(parseCheckinRangeMinutes("10-3"), null);
   assert.equal(parseCheckinRangeMinutes("abc"), null);
+});
+
+test("quiet hours support an overnight Asia/Shanghai window", () => {
+  assert.deepEqual(parseQuietHours("23:00-08:00"), {
+    startMinuteOfDay: 23 * 60,
+    endMinuteOfDay: 8 * 60,
+  });
+  assert.equal(parseQuietHours("24:00-08:00"), null);
+  assert.equal(parseQuietHours("08:00-08:00"), null);
+  assert.equal(isWithinQuietHours("2026-08-29T15:30:00.000Z", "23:00-08:00"), true);
+  assert.equal(isWithinQuietHours("2026-08-30T00:30:00.000Z", "23:00-08:00"), false);
 });
 
 test("checkin config store falls back to defaults and persists overrides", () => {
