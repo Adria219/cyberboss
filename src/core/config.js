@@ -46,6 +46,13 @@ function readConfig() {
     stickerTagsTemplateFile: path.resolve(__dirname, "..", "..", "templates", "stickers", "tags.json"),
     stickerNormalizeGifScript: path.resolve(__dirname, "..", "..", "scripts", "normalize-sticker-gif.js"),
     diaryDir: path.join(stateDir, "diary"),
+    arousalPrimaryFile: path.join(stateDir, "arousal", "body-state-unit.json"),
+    arousalBackupFile: path.join(stateDir, "arousal", "body-state-unit.backup.json"),
+    arousalLexiconFile: path.join(stateDir, "arousal", "lexicon.private.json"),
+    arousalPort: readPortEnv("CYBERBOSS_AROUSAL_PORT") || 4321,
+    arousalToken: readTextEnv("CYBERBOSS_AROUSAL_TOKEN"),
+    arousalAllowedOrigins: readListEnv("CYBERBOSS_AROUSAL_ALLOWED_ORIGINS"),
+    startWithArousal: mode === "start" && readBoolEnv("CYBERBOSS_ENABLE_AROUSAL"),
     locationStoreFile: path.join(stateDir, "locations.json"),
     locationHost: readTextEnv("CYBERBOSS_LOCATION_HOST") || "0.0.0.0",
     locationPort: readIntEnv("CYBERBOSS_LOCATION_PORT") || 4318,
@@ -125,6 +132,11 @@ function readIntEnv(name) {
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function readPortEnv(name) {
+  const value = readIntEnv(name);
+  return Number.isInteger(value) && value >= 1 && value <= 65_535 ? value : undefined;
 }
 
 function readKnownPlacesEnv() {

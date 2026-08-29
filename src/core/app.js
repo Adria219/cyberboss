@@ -49,6 +49,8 @@ const {
 } = require("../adapters/runtime/shared/approval-command");
 const { runSystemCheckinPoller } = require("../app/system-checkin-poller");
 const { createProjectTooling } = require("../tools/create-project-tooling");
+const { ArousalService } = require("../arousal/arousal-service");
+const { ArousalHttpServer } = require("../arousal/arousal-http-server");
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MIN_LONG_POLL_TIMEOUT_MS = 2_000;
 const SESSION_EXPIRED_ERRCODE = -14;
@@ -91,6 +93,23 @@ class CyberbossApp {
     this.pendingInboundByScope = new Map();
     this.pendingImageInboundByScope = new Map();
     this.turnBoundaryScopeKeys = new Set();
+    this.arousalSourceEventByRunKey = new Map();
+    this.arousalFinalTextByRunKey = new Map();
+    this.arousalService = config.startWithArousal
+      ? new ArousalService({
+          primaryFile: config.arousalPrimaryFile,
+          backupFile: config.arousalBackupFile,
+          lexiconFile: config.arousalLexiconFile,
+        })
+      : null;
+    this.arousalHttpServer = this.arousalService
+      ? new ArousalHttpServer({
+          service: this.arousalService,
+          port: config.arousalPort,
+          token: config.arousalToken,
+          allowedOrigins: config.arousalAllowedOrigins,
+        })
+      : null;
     this.systemMessageDispatcher = null;
     this.checkinQuietHours = resolveQuietHours(this.config.checkinQuietHours);
     this.streamDelivery = new StreamDelivery({
@@ -163,6 +182,10 @@ class CyberbossApp {
     if (this.config.startWithLocationServer) {
       await this.ensureLocationServerStarted();
     }
+    if (this.arousalHttpServer) {
+      const address = await this.arousalHttpServer.start();
+      console.log(`[cyberboss] arousal=127.0.0.1:${address?.port || this.config.arousalPort}`);
+    }
     console.log("[cyberboss] bridge loop started; waiting for WeChat messages.");
     this.checkinPollerAbort = new AbortController();
     const checkinEnabled = this.checkinConfigStore.getEnabled(this.config.startWithCheckin);
@@ -180,6 +203,7 @@ class CyberbossApp {
       this.checkinPollerAbort?.abort();
       await this.checkinPollerPromise?.catch(() => {});
       await this.closeLocationServer();
+      await this.arousalHttpServer?.close();
       await this.runtimeAdapter.close();
     });
 
@@ -230,6 +254,7 @@ class CyberbossApp {
       shutdown.dispose();
       this.clearPendingImageInboundTimers();
       await this.closeLocationServer();
+      await this.arousalHttpServer?.close();
       await this.runtimeAdapter.close();
     }
   }
@@ -405,6 +430,15 @@ class CyberbossApp {
       return;
     }
 
+    const arousalUserEventId = buildArousalUserEventId(normalized);
+    if (this.config?.startWithArousal && arousalUserEventId
+      && this.arousalService?.recordUserFinal) {
+      safeRecordArousalEvent(this.arousalService, "recordUserFinal", {
+        eventId: arousalUserEventId,
+        text: normalized.text,
+      });
+    }
+
     const workspaceRoot = this.resolveWorkspaceRoot(bindingKey);
     const prepared = await this.prepareIncomingMessageForRuntime(normalized, workspaceRoot);
     if (!prepared) {
@@ -473,6 +507,14 @@ class CyberbossApp {
           senderId: prepared.senderId,
         },
       });
+      const arousalUserEventId = buildArousalUserEventId(prepared);
+      if (this.config?.startWithArousal && arousalUserEventId
+        && this.arousalSourceEventByRunKey?.set) {
+        this.arousalSourceEventByRunKey.set(
+          buildRunKey(turn.threadId, turn.turnId),
+          arousalUserEventId,
+        );
+      }
       this.runtimeContextStore?.setActiveContext?.({
         workspaceRoot,
         runtimeId: this.runtimeAdapter.describe().id,
@@ -486,9 +528,9 @@ class CyberbossApp {
         userId: prepared.senderId,
         contextToken: prepared.contextToken,
         provider: prepared.provider,
-        systemKind: prepared.systemKind,
-        systemMessageId: prepared.messageId,
       };
+      if (prepared.systemKind) replyTarget.systemKind = prepared.systemKind;
+      if (prepared.systemKind && prepared.messageId) replyTarget.systemMessageId = prepared.messageId;
       if (turn.turnId) {
         this.streamDelivery.bindReplyTargetForTurn({
           threadId: turn.threadId,
@@ -519,8 +561,16 @@ class CyberbossApp {
 
   async buildRuntimeTurn({ prepared, model = "" }) {
     if (prepared?.provider === "system") {
+      const arousalStatus = this.config?.startWithArousal && prepared.systemKind === "checkin"
+        ? safeGetArousalStatusLine(this.arousalService)
+        : "";
       return {
-        text: String(prepared.text || "").trim(),
+        text: [
+          String(prepared.text || "").trim(),
+          arousalStatus
+            ? `[本地身体状态]\n${arousalStatus}\n只作为本次主动问候的语气与节奏提示；它不是必须联系用户的指令，仍可选择 silent 或 leave_note。不得复述内部数值或持久化内容。`
+            : "",
+        ].filter(Boolean).join("\n\n"),
         attachments: [],
       };
     }
@@ -530,12 +580,21 @@ class CyberbossApp {
       runtimeAdapter: this.runtimeAdapter,
       model,
     });
+    const baseText = assembleRuntimeTurnText({
+      prepared,
+      config: this.config,
+      visionContext,
+    });
+    const arousalStatus = this.config.startWithArousal
+      ? safeGetArousalStatusLine(this.arousalService)
+      : "";
     return {
-      text: assembleRuntimeTurnText({
-        prepared,
-        config: this.config,
-        visionContext,
-      }),
+      text: [
+        baseText,
+        arousalStatus
+          ? `[本地身体状态]\n${arousalStatus}\n只作为语气与节奏提示，不得复述内部数值或持久化内容。`
+          : "",
+      ].filter(Boolean).join("\n\n"),
       attachments: Array.isArray(visionContext.runtimeAttachments) ? visionContext.runtimeAttachments : [],
       visionContext,
     };
@@ -729,6 +788,7 @@ class CyberbossApp {
           workspaceId: pendingDispatch.prepared.workspaceId,
           accountId: pendingDispatch.prepared.accountId,
           senderId: pendingDispatch.prepared.senderId,
+          messageId: pendingDispatch.prepared.messageId,
           contextToken: pendingDispatch.prepared.contextToken,
           provider: pendingDispatch.prepared.provider,
           originalText: pendingDispatch.prepared.originalText,
@@ -1527,12 +1587,34 @@ class CyberbossApp {
           turnId: event?.payload?.turnId,
         })
       : null;
+    if (event?.type === "runtime.reply.completed") {
+      const runKey = buildRunKey(event?.payload?.threadId, event?.payload?.turnId);
+      const text = String(event?.payload?.text || "").trim();
+      if (text && this.arousalFinalTextByRunKey?.set) {
+        this.arousalFinalTextByRunKey.set(runKey, text);
+      }
+    }
     await this.streamDelivery.handleRuntimeEvent(event);
     if (!event) {
       return;
     }
     if (event.type === "runtime.turn.completed" || event.type === "runtime.turn.failed") {
       const completedRunKey = buildRunKey(event.payload.threadId, event.payload.turnId);
+      const sourceUserEventId = this.arousalSourceEventByRunKey?.get?.(completedRunKey) || "";
+      const assistantFinalText = this.arousalFinalTextByRunKey?.get?.(completedRunKey)
+        || String(event.payload.text || "").trim();
+      this.arousalSourceEventByRunKey?.delete?.(completedRunKey);
+      this.arousalFinalTextByRunKey?.delete?.(completedRunKey);
+      if (this.config?.startWithArousal && event.type === "runtime.turn.completed"
+        && sourceUserEventId && assistantFinalText
+        && this.arousalService?.recordAssistantFinal) {
+        safeRecordArousalEvent(this.arousalService, "recordAssistantFinal", {
+          eventId: `${completedRunKey}:assistant-final`,
+          sourceUserEventId,
+          text: assistantFinalText,
+          complete: true,
+        });
+      }
       const pendingOperations = this.pendingOperationByRunKey;
       const pendingOperation = pendingOperations?.get?.(completedRunKey) || null;
       if (pendingOperation && pendingOperations?.delete) {
@@ -2369,6 +2451,35 @@ function groupDeferredReplies(replies) {
     grouped.plain.push(normalizedText);
   }
   return grouped;
+}
+
+function buildArousalUserEventId(message) {
+  const provider = normalizeText(message?.provider);
+  const accountId = normalizeText(message?.accountId);
+  const senderId = normalizeText(message?.senderId);
+  const messageId = normalizeText(message?.messageId);
+  if (!provider || provider === "system" || !accountId || !senderId || !messageId) return "";
+  return `${provider}:${accountId}:${senderId}:${messageId}`;
+}
+
+function safeRecordArousalEvent(service, method, payload) {
+  try {
+    return service?.[method]?.(payload) || null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "unknown error");
+    console.error(`[cyberboss] local body-state write failed: ${message}`);
+    return null;
+  }
+}
+
+function safeGetArousalStatusLine(service) {
+  try {
+    return service?.getStatusLine?.() || "";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "unknown error");
+    console.error(`[cyberboss] local body-state read failed: ${message}`);
+    return "射精值：状态已锁定，等待本地修复";
+  }
 }
 
 function formatCheckinStatus({ enabled, range, runtime, heldNotes }) {

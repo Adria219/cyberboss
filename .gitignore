@@ -7,3 +7,10 @@ node_modules/
 npm-debug.log*
 third_party/
 firmware/
+**/lexicon.private.json
+**/body-state-unit.json
+**/body-state-unit.backup.json
+**/body-state-unit.json.initialized
+**/body_state.json
+**/arousal-event-ledger.json
+**/release-effect-ledger.json

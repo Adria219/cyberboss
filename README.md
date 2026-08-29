@@ -170,6 +170,10 @@ CYBERBOSS_LOCATION_WORK_CENTER=
 CYBERBOSS_LOCATION_KNOWN_PLACES=
 CYBERBOSS_LOCATION_PLACE_RADIUS_METERS=150
 CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT=100
+CYBERBOSS_ENABLE_AROUSAL=false
+CYBERBOSS_AROUSAL_PORT=4321
+CYBERBOSS_AROUSAL_TOKEN=
+CYBERBOSS_AROUSAL_ALLOWED_ORIGINS=
 ```
 
 What these do:
@@ -226,6 +230,14 @@ What these do:
   Radius for place-tag matching. Default is `150`.
 - `CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT`
   Number of battery observations to retain. Default is `100`.
+- `CYBERBOSS_ENABLE_AROUSAL`
+  Opt in to the local body-state unit. It is fully inactive by default. See [Local Arousal Core](./docs/arousal-local-core.md).
+- `CYBERBOSS_AROUSAL_PORT`
+  Port for the read-only loopback endpoint. Default is `4321`; the host is fixed to `127.0.0.1`.
+- `CYBERBOSS_AROUSAL_TOKEN`
+  Optional bearer token for the loopback read endpoint.
+- `CYBERBOSS_AROUSAL_ALLOWED_ORIGINS`
+  Comma-separated exact browser-origin allowlist for the loopback read endpoint.
 
 Why this matters:
 
