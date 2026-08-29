@@ -156,6 +156,7 @@ CYBERBOSS_VISION_API_KEY=
 CYBERBOSS_VISION_MODEL=
 CYBERBOSS_VISION_TIMEOUT_MS=30000
 CYBERBOSS_ACCOUNT_ID=
+CYBERBOSS_CHECKIN_QUIET_HOURS=23:00-08:00
 CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS=20
 CYBERBOSS_WEIXIN_BASE_URL=https://ilinkai.weixin.qq.com
 CYBERBOSS_WEIXIN_CDN_BASE_URL=https://novac2c.cdn.weixin.qq.com/c2c
@@ -391,7 +392,7 @@ Common contents:
 - `system-message-queue.json`
   system / check-in queue
 - `deferred-system-replies.json`
-  replies waiting for the next usable WeChat context token
+  replies waiting for the next usable WeChat context token, plus local proactive notes held until the user returns
 - `checkin-config.json`
   saved proactive check-in range
 - `timeline-screenshot-queue.json`
@@ -476,6 +477,8 @@ Because the project is not published as an npm package yet. Clone the repo and r
 ### What exactly is `checkin`?
 
 `checkin` is the random wake-up mechanism. The system wakes the model at a random time and lets it decide whether to show up, stay silent, write data, or act.
+
+`CYBERBOSS_CHECKIN_QUIET_HOURS` sets the local Asia/Shanghai quiet window (`HH:MM-HH:MM`, default `23:00-08:00`). During that window, only proactive check-in messages are held locally instead of being sent. The model may also explicitly choose `leave_note`; those notes are shown when the same user next messages the bot. Reminders and other system events are not blocked by this gate. Cyberboss does not read the phone's operating-system DND state.
 
 ### Why set user name and gender before the first run?
 

@@ -3,6 +3,7 @@ const path = require("path");
 
 const DEFAULT_MIN_INTERVAL_MS = 3 * 60_000;
 const DEFAULT_MAX_INTERVAL_MS = 60 * 60_000;
+const DEFAULT_CHECKIN_QUIET_HOURS = "23:00-08:00";
 
 class CheckinConfigStore {
   constructor({ filePath }) {
@@ -66,6 +67,65 @@ function parseCheckinRangeMinutes(input) {
   return { minMinutes, maxMinutes };
 }
 
+function parseQuietHours(input) {
+  const normalized = typeof input === "string" ? input.trim() : "";
+  const match = normalized.match(/^(\d{2}):(\d{2})\s*-\s*(\d{2}):(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+  const startHour = Number.parseInt(match[1], 10);
+  const startMinute = Number.parseInt(match[2], 10);
+  const endHour = Number.parseInt(match[3], 10);
+  const endMinute = Number.parseInt(match[4], 10);
+  if (startHour > 23 || endHour > 23 || startMinute > 59 || endMinute > 59) {
+    return null;
+  }
+  const startMinuteOfDay = startHour * 60 + startMinute;
+  const endMinuteOfDay = endHour * 60 + endMinute;
+  if (startMinuteOfDay === endMinuteOfDay) {
+    return null;
+  }
+  return { startMinuteOfDay, endMinuteOfDay };
+}
+
+function resolveQuietHours(input, { warn = console.warn } = {}) {
+  const normalized = typeof input === "string" ? input.trim() : "";
+  const configured = parseQuietHours(normalized);
+  if (configured) {
+    return configured;
+  }
+  if (normalized && typeof warn === "function") {
+    warn(
+      `[cyberboss] invalid CYBERBOSS_CHECKIN_QUIET_HOURS=${JSON.stringify(normalized)}; using safe default ${DEFAULT_CHECKIN_QUIET_HOURS}`
+    );
+  }
+  return parseQuietHours(DEFAULT_CHECKIN_QUIET_HOURS);
+}
+
+function isWithinQuietHours(value, quietHours, timeZone = "Asia/Shanghai") {
+  const window = typeof quietHours === "string" ? parseQuietHours(quietHours) : quietHours;
+  const date = value instanceof Date ? value : new Date(value);
+  if (!window || Number.isNaN(date.getTime())) {
+    return false;
+  }
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const hour = Number.parseInt(parts.find((part) => part.type === "hour")?.value || "", 10);
+  const minute = Number.parseInt(parts.find((part) => part.type === "minute")?.value || "", 10);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return false;
+  }
+  const minuteOfDay = hour * 60 + minute;
+  if (window.startMinuteOfDay < window.endMinuteOfDay) {
+    return minuteOfDay >= window.startMinuteOfDay && minuteOfDay < window.endMinuteOfDay;
+  }
+  return minuteOfDay >= window.startMinuteOfDay || minuteOfDay < window.endMinuteOfDay;
+}
+
 function normalizePersistedRange(value) {
   if (!value || typeof value !== "object") {
     return null;
@@ -102,8 +162,12 @@ function readIntervalMs(rawValue, fallback) {
 
 module.exports = {
   CheckinConfigStore,
+  DEFAULT_CHECKIN_QUIET_HOURS,
   DEFAULT_MIN_INTERVAL_MS,
   DEFAULT_MAX_INTERVAL_MS,
   parseCheckinRangeMinutes,
+  parseQuietHours,
+  resolveQuietHours,
+  isWithinQuietHours,
   resolveDefaultCheckinRange,
 };

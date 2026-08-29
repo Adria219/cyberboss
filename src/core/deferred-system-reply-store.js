@@ -125,7 +125,7 @@ function normalizeText(value) {
 
 function normalizeDeferredReplyKind(value) {
   const normalized = normalizeText(value);
-  return normalized === "system_reply" ? normalized : "plain_reply";
+  return ["system_reply", "proactive_note"].includes(normalized) ? normalized : "plain_reply";
 }
 
 module.exports = { DeferredSystemReplyStore };

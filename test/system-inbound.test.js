@@ -5,6 +5,9 @@ const os = require("os");
 const path = require("path");
 
 const { CyberbossApp } = require("../src/core/app");
+const { DeferredSystemReplyStore } = require("../src/core/deferred-system-reply-store");
+const { SystemMessageDispatcher } = require("../src/core/system-message-dispatcher");
+const { SystemMessageQueueStore } = require("../src/core/system-message-queue-store");
 
 test("system messages bypass normal inbound wrapping", async () => {
   const prepared = await CyberbossApp.prototype.prepareIncomingMessageForRuntime.call({}, {
@@ -20,6 +23,42 @@ test("system messages bypass normal inbound wrapping", async () => {
     attachments: [],
     attachmentFailures: [],
   });
+});
+
+test("check-in kind survives the system queue and proactive notes survive local persistence", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-system-kind-test-"));
+  const queue = new SystemMessageQueueStore({ filePath: path.join(stateDir, "system-message-queue.json") });
+  queue.enqueue({
+    id: "checkin-1",
+    accountId: "account-1",
+    senderId: "user-1",
+    workspaceRoot: "/workspace",
+    text: "fictional check-in",
+    kind: "checkin",
+    createdAt: "2026-08-29T15:30:00.000Z",
+  });
+  const [message] = queue.drainForAccount("account-1");
+  const dispatcher = new SystemMessageDispatcher({
+    queueStore: queue,
+    config: { workspaceId: "default", workspaceRoot: "/workspace" },
+    accountId: "account-1",
+  });
+  const prepared = dispatcher.buildPreparedMessage(message, "ctx-1");
+  assert.equal(prepared.systemKind, "checkin");
+  assert.match(prepared.text, /leave_note/);
+
+  const deferred = new DeferredSystemReplyStore({ filePath: path.join(stateDir, "deferred-system-replies.json") });
+  deferred.enqueue({
+    id: "note-1",
+    accountId: "account-1",
+    senderId: "user-1",
+    threadId: "thread-1",
+    text: "醒来再看。",
+    kind: "proactive_note",
+    createdAt: "2026-08-29T15:31:00.000Z",
+    failedAt: "2026-08-29T15:31:00.000Z",
+  });
+  assert.equal(deferred.drainForSender("account-1", "user-1")[0].kind, "proactive_note");
 });
 
 test("image attachments stay as inbound drafts before runtime turn assembly", async () => {

@@ -30,33 +30,47 @@ class SystemMessageDispatcher {
       threadKey: `system:${message.senderId}`,
       senderId: message.senderId,
       messageId: message.id,
-      text: buildSystemInboundText(message?.text, message?.createdAt),
+      text: buildSystemInboundText(message?.text, message?.createdAt, message?.kind),
       attachments: [],
       command: "message",
       contextToken,
       receivedAt: normalizeIsoTime(message?.createdAt) || new Date().toISOString(),
       workspaceRoot: this.resolveWorkspaceRoot(message),
+      systemKind: normalizeSystemMessageKind(message?.kind),
     };
   }
 }
 
-function buildSystemInboundText(text, createdAt = "") {
+function buildSystemInboundText(text, createdAt = "", kind = "") {
   const body = normalizeText(text);
+  const systemKind = normalizeSystemMessageKind(kind);
+  const isCheckin = systemKind === "checkin";
   const localTime = formatSystemLocalTime(createdAt);
   const sections = [
     ...(localTime ? [`[${localTime}]`, ""] : []),
     "SYSTEM ACTION MODE: internal trigger, not user chat.",
     "Do any timeline/diary/reminder/whereabouts work in this turn.",
+    ...(isCheckin
+      ? ["This is a proactive check-in. If contacting the user now would be ill-timed, leave one short local note instead of interrupting them."]
+      : []),
     "If you act, end with send_message that briefly and naturally reflects what you did or what changed; use silent only if you do nothing.",
     "Return exactly one JSON object after any tool calls:",
     "{\"action\":\"silent\"}",
     "{\"action\":\"send_message\",\"message\":\"<one short natural WeChat message>\"}",
+    ...(isCheckin
+      ? ["{\"action\":\"leave_note\",\"message\":\"<one short natural note for the user>\"}"]
+      : []),
     "No markdown fences. No reasoning. No text outside the JSON.",
   ];
   if (body) {
     sections.push("", "Trigger:", body);
   }
   return sections.join("\n").trim();
+}
+
+function normalizeSystemMessageKind(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized === "checkin" ? normalized : "system";
 }
 
 function formatSystemLocalTime(value) {

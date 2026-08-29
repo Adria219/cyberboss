@@ -38,6 +38,7 @@ async function runSystemCheckinPoller(config) {
       senderId: target.senderId,
       workspaceRoot: target.workspaceRoot,
       text: buildCheckinTrigger(config),
+      kind: "checkin",
       createdAt: new Date().toISOString(),
     });
     console.log(`[cyberboss] checkin queued id=${queued.id}`);
