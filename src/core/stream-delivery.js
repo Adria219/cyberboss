@@ -341,8 +341,11 @@ class StreamDelivery {
 
     if (resolved.kind === "leave_note" || (resolved.kind === "send_message" && this.shouldHoldSystemMessage(state, resolved.message))) {
       const held = await this.holdProactiveSystemReply(state, resolved.message);
-      if (held) {
-        this.markAllItemsSent(state);
+      this.markAllItemsSent(state);
+      if (!held) {
+        console.error(
+          `[cyberboss] proactive note dropped fail-closed after local storage failure thread=${state.threadId}`
+        );
       }
       return;
     }

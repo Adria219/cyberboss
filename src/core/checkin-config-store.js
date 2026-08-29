@@ -3,6 +3,7 @@ const path = require("path");
 
 const DEFAULT_MIN_INTERVAL_MS = 3 * 60_000;
 const DEFAULT_MAX_INTERVAL_MS = 60 * 60_000;
+const DEFAULT_CHECKIN_QUIET_HOURS = "23:00-08:00";
 
 class CheckinConfigStore {
   constructor({ filePath }) {
@@ -87,6 +88,20 @@ function parseQuietHours(input) {
   return { startMinuteOfDay, endMinuteOfDay };
 }
 
+function resolveQuietHours(input, { warn = console.warn } = {}) {
+  const normalized = typeof input === "string" ? input.trim() : "";
+  const configured = parseQuietHours(normalized);
+  if (configured) {
+    return configured;
+  }
+  if (normalized && typeof warn === "function") {
+    warn(
+      `[cyberboss] invalid CYBERBOSS_CHECKIN_QUIET_HOURS=${JSON.stringify(normalized)}; using safe default ${DEFAULT_CHECKIN_QUIET_HOURS}`
+    );
+  }
+  return parseQuietHours(DEFAULT_CHECKIN_QUIET_HOURS);
+}
+
 function isWithinQuietHours(value, quietHours, timeZone = "Asia/Shanghai") {
   const window = typeof quietHours === "string" ? parseQuietHours(quietHours) : quietHours;
   const date = value instanceof Date ? value : new Date(value);
@@ -147,10 +162,12 @@ function readIntervalMs(rawValue, fallback) {
 
 module.exports = {
   CheckinConfigStore,
+  DEFAULT_CHECKIN_QUIET_HOURS,
   DEFAULT_MIN_INTERVAL_MS,
   DEFAULT_MAX_INTERVAL_MS,
   parseCheckinRangeMinutes,
   parseQuietHours,
+  resolveQuietHours,
   isWithinQuietHours,
   resolveDefaultCheckinRange,
 };

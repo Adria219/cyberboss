@@ -11,6 +11,7 @@ const {
   isWithinQuietHours,
   parseCheckinRangeMinutes,
   parseQuietHours,
+  resolveQuietHours,
 } = require("../src/core/checkin-config-store");
 const { CyberbossApp } = require("../src/core/app");
 
@@ -35,6 +36,23 @@ test("quiet hours support an overnight Asia/Shanghai window", () => {
   assert.equal(parseQuietHours("08:00-08:00"), null);
   assert.equal(isWithinQuietHours("2026-08-29T15:30:00.000Z", "23:00-08:00"), true);
   assert.equal(isWithinQuietHours("2026-08-30T00:30:00.000Z", "23:00-08:00"), false);
+});
+
+test("invalid quiet hours warn and fall back to the safe default", () => {
+  const warnings = [];
+  const resolved = resolveQuietHours("9:00~17:00", {
+    warn(message) {
+      warnings.push(message);
+    },
+  });
+
+  assert.deepEqual(resolved, {
+    startMinuteOfDay: 23 * 60,
+    endMinuteOfDay: 8 * 60,
+  });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /invalid CYBERBOSS_CHECKIN_QUIET_HOURS/);
+  assert.equal(isWithinQuietHours("2026-08-29T15:30:00.000Z", resolved), true);
 });
 
 test("checkin config store falls back to defaults and persists overrides", () => {

@@ -114,6 +114,42 @@ test("system leave_note stores a local proactive note without sending", async ()
   assert.equal(deferred[0].kind, "proactive_note");
 });
 
+test("proactive note storage failure drops the note fail-closed without sending", async () => {
+  let storeAttempts = 0;
+  const { sent, streamDelivery } = createHarness({
+    async onDeferredSystemReply() {
+      storeAttempts += 1;
+      throw new Error("disk unavailable");
+    },
+  });
+  streamDelivery.queueReplyTargetForThread("thread-note-failure", {
+    userId: "user-note",
+    contextToken: "ctx-note",
+    provider: "system",
+    systemKind: "checkin",
+  });
+
+  await streamDelivery.handleRuntimeEvent({
+    type: "runtime.turn.started",
+    payload: { threadId: "thread-note-failure", turnId: "turn-note-failure" },
+  });
+  await streamDelivery.handleRuntimeEvent({
+    type: "runtime.reply.completed",
+    payload: {
+      threadId: "thread-note-failure",
+      turnId: "turn-note-failure",
+      itemId: "item-note-failure",
+      text: "{\"action\":\"leave_note\",\"message\":\"醒来再说。\"}",
+    },
+  });
+  const state = streamDelivery.ensureRunState("thread-note-failure", "turn-note-failure");
+  await streamDelivery.flushSystemReply(state, { force: true });
+
+  assert.deepEqual(sent, []);
+  assert.equal(storeAttempts, 1);
+  assert.equal(state.sentItemIds.has("item-note-failure"), true);
+});
+
 test("quiet-hours gate holds only a proactive check-in send_message", async () => {
   const deferred = [];
   const { sent, streamDelivery } = createHarness({

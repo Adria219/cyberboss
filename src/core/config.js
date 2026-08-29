@@ -1,5 +1,6 @@
 const os = require("os");
 const path = require("path");
+const { DEFAULT_CHECKIN_QUIET_HOURS } = require("./checkin-config-store");
 
 function readConfig() {
   const argv = process.argv.slice(2);
@@ -29,7 +30,7 @@ function readConfig() {
     systemMessageQueueFile: path.join(stateDir, "system-message-queue.json"),
     deferredSystemReplyQueueFile: path.join(stateDir, "deferred-system-replies.json"),
     checkinConfigFile: path.join(stateDir, "checkin-config.json"),
-    checkinQuietHours: readTextEnv("CYBERBOSS_CHECKIN_QUIET_HOURS") || "23:00-08:00",
+    checkinQuietHours: readTextEnv("CYBERBOSS_CHECKIN_QUIET_HOURS") || DEFAULT_CHECKIN_QUIET_HOURS,
     timelineScreenshotQueueFile: path.join(stateDir, "timeline-screenshot-queue.json"),
     projectToolContextFile: path.join(stateDir, "project-tool-runtime-context.json"),
     weixinInstructionsFile: path.join(stateDir, "weixin-instructions.md"),

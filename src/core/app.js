@@ -26,7 +26,7 @@ const {
   CheckinConfigStore,
   isWithinQuietHours,
   parseCheckinRangeMinutes,
-  parseQuietHours,
+  resolveQuietHours,
   resolveDefaultCheckinRange,
 } = require("./checkin-config-store");
 const { resolvePreferredSenderId, resolvePreferredWorkspaceRoot } = require("./default-targets");
@@ -88,13 +88,14 @@ class CyberbossApp {
     this.pendingImageInboundByScope = new Map();
     this.turnBoundaryScopeKeys = new Set();
     this.systemMessageDispatcher = null;
+    this.checkinQuietHours = resolveQuietHours(this.config.checkinQuietHours);
     this.streamDelivery = new StreamDelivery({
       channelAdapter: this.channelAdapter,
       sessionStore: this.runtimeAdapter.getSessionStore(),
       runtimeId: this.runtimeAdapter.describe().id,
       onDeferredSystemReply: (payload) => this.deferSystemReply(payload),
       shouldHoldSystemReply: ({ target }) => target?.systemKind === "checkin"
-        && isWithinQuietHours(new Date(), parseQuietHours(this.config.checkinQuietHours)),
+        && isWithinQuietHours(new Date(), this.checkinQuietHours),
     });
     this.pendingOperationByRunKey = new Map();
     this.runtimeEventChain = Promise.resolve();
