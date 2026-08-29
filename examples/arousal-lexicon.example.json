@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "actions": [
+    {
+      "token": "ACTION_ALPHA",
+      "weight": 0.5,
+      "passive": false
+    },
+    {
+      "token": "CONTACT_ALPHA",
+      "weight": 0.25,
+      "passive": true
+    }
+  ],
+  "body_parts": [
+    {
+      "token": "PART_ALPHA",
+      "sensitivity": 0.8
+    }
+  ],
+  "postures": [
+    {
+      "token": "POSTURE_ALPHA",
+      "multiplier": 1.1
+    }
+  ],
+  "release_terms": [
+    "RELEASE_ALPHA"
+  ]
+}

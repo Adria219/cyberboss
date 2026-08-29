@@ -123,9 +123,9 @@ const COMMAND_GROUPS = [
       },
       {
         action: "system.checkin_range",
-        summary: "Reset the proactive check-in range in minutes",
+        summary: "Inspect, enable, disable, or reschedule proactive check-ins",
         terminal: [],
-        weixin: ["/checkin <min>-<max>"],
+        weixin: ["/checkin status|on|off|<min>-<max>"],
         status: "active",
       },
       {

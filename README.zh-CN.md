@@ -307,8 +307,8 @@ model_catalog_json = "/绝对路径/.codex/local-models.json"
   切换到指定线程
 - `/stop`
   停止当前线程里的运行
-- `/checkin <min>-<max>`
-  调整当前项目的随机 checkin 区间
+- `/checkin status|on|off|<min>-<max>`
+  查看、开启、关闭或调整当前项目的随机 checkin
 - `/chunk <number>`
   调整微信短回复的最小合并字符数
 - `/yes`
@@ -401,7 +401,13 @@ ${HOME}/.cyberboss
 - `system-message-queue.json`
   system / checkin 队列
 - `deferred-system-replies.json`
-  等待下一个可用微信 context token 的补发消息
+  等待下一个可用微信 context token 的补发消息，以及留到用户回来再看的本地主动留言
+- `checkin-config.json`
+  持久保存主动唤醒开关与随机区间
+- `checkin-runtime.json`
+  保存调度状态与最近一次降敏回执，不保存消息正文
+- `checkin-poller.lock`
+  防止同一台机器重复启动两个主动唤醒调度器
 - `timeline-screenshot-queue.json`
   截图任务队列
 - `diary/`
@@ -486,6 +492,8 @@ ${HOME}/.cyberboss
 ### `checkin` 到底是什么？
 
 `checkin` 就是“随机轮询唤醒”能力。系统会在一个随机时间点唤醒模型，让它自己判断现在该不该主动出现。
+
+`/checkin on` 与 `/checkin off` 会持久保存开关；关闭时调度器留在后台待命，但不会排队或发送新的主动唤醒。`/checkin status` 会显示随机区间、掩码后的目标、下次时间、最近一次动作与结果，以及仍留在本地等待用户回来的留言数。单机锁会阻止两个 bridge 重复调度。
 
 ### 为什么要在第一次运行前就设置用户名和性别？
 
