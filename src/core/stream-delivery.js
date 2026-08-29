@@ -3,12 +3,13 @@ const { sanitizeProtocolLeakText } = require("../adapters/runtime/codex/protocol
 const CURRENT_REPLY_HEADER = "===== 本轮模型回复 =====";
 
 class StreamDelivery {
-  constructor({ channelAdapter, sessionStore, runtimeId = "", onDeferredSystemReply, shouldHoldSystemReply, systemReplyRetryScheduleMs, sameTokenRetryDelayMs }) {
+  constructor({ channelAdapter, sessionStore, runtimeId = "", onDeferredSystemReply, onSystemReplyOutcome, shouldHoldSystemReply, systemReplyRetryScheduleMs, sameTokenRetryDelayMs }) {
     this.channelAdapter = channelAdapter;
     this.sessionStore = sessionStore;
     this.runtimeId = normalizeRuntimeId(runtimeId);
     this.systemReplyPolicy = createSystemReplyPolicy(this.runtimeId);
     this.onDeferredSystemReply = typeof onDeferredSystemReply === "function" ? onDeferredSystemReply : null;
+    this.onSystemReplyOutcome = typeof onSystemReplyOutcome === "function" ? onSystemReplyOutcome : null;
     this.shouldHoldSystemReply = typeof shouldHoldSystemReply === "function" ? shouldHoldSystemReply : null;
     this.systemReplyRetryScheduleMs = Array.isArray(systemReplyRetryScheduleMs) && systemReplyRetryScheduleMs.length
       ? systemReplyRetryScheduleMs.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value >= 0)
@@ -33,6 +34,7 @@ class StreamDelivery {
       contextToken: String(target.contextToken).trim(),
       provider: normalizeText(target.provider),
       systemKind: normalizeText(target.systemKind),
+      systemMessageId: normalizeText(target.systemMessageId),
     });
   }
 
@@ -328,6 +330,7 @@ class StreamDelivery {
     const resolved = resolveSystemReplyDelivery(replyText, this.systemReplyPolicy);
     if (resolved.kind === "silent") {
       this.markAllItemsSent(state);
+      this.recordSystemReplyOutcome(state, { action: "silent", outcome: "suppressed" });
       console.log(
         `[cyberboss] suppressed system reply thread=${state.threadId} action=silent preview=${JSON.stringify(replyText.slice(0, 120))}`
       );
@@ -335,6 +338,7 @@ class StreamDelivery {
     }
 
     if (resolved.kind === "leave_note" && state.replyTarget?.systemKind !== "checkin") {
+      this.recordSystemReplyOutcome(state, { action: "invalid", outcome: "rejected" });
       console.error(`[cyberboss] leave_note rejected outside proactive check-in thread=${state.threadId}`);
       return;
     }
@@ -347,10 +351,15 @@ class StreamDelivery {
           `[cyberboss] proactive note dropped fail-closed after local storage failure thread=${state.threadId}`
         );
       }
+      this.recordSystemReplyOutcome(state, {
+        action: resolved.kind,
+        outcome: held ? "held" : "dropped",
+      });
       return;
     }
 
     if (resolved.kind !== "send_message") {
+      this.recordSystemReplyOutcome(state, { action: "invalid", outcome: "rejected" });
       console.error(
         `[cyberboss] invalid system reply thread=${state.threadId} reason=${resolved.reason} preview=${JSON.stringify(replyText.slice(0, 160))}`
       );
@@ -358,9 +367,11 @@ class StreamDelivery {
     }
 
     state.sendChain = state.sendChain.then(async () => {
-      await this.sendSystemReply(state, resolved.message);
+      const outcome = await this.sendSystemReply(state, resolved.message);
       this.markAllItemsSent(state);
+      this.recordSystemReplyOutcome(state, { action: "send_message", outcome });
     }).catch((error) => {
+      this.recordSystemReplyOutcome(state, { action: "send_message", outcome: "failed" });
       console.error(`[cyberboss] failed to deliver system reply thread=${state.threadId}: ${error.message}`);
     });
 
@@ -444,20 +455,20 @@ class StreamDelivery {
       text,
       contextToken: initialTarget.contextToken,
     };
-    await this.sendTextWithRetry(state, payload, { kind: "system_reply" });
+    return this.sendTextWithRetry(state, payload, { kind: "system_reply" });
   }
 
   async sendTextWithRetry(state, payload, { kind }) {
     const initialTarget = state.replyTarget;
     try {
       await this.channelAdapter.sendText(payload);
-      return;
+      return "sent";
     } catch (error) {
       const retryTarget = this.resolveRetriableReplyTarget(initialTarget, error);
       if (!retryTarget) {
         const deferred = await this.deferSystemReply(state, payload.text, error, kind);
         if (deferred) {
-          return;
+          return "deferred";
         }
         throw error;
       }
@@ -480,12 +491,15 @@ class StreamDelivery {
             userId: retryTarget.userId,
             contextToken: retryTarget.contextToken,
             provider: retryTarget.provider,
+            systemKind: retryTarget.systemKind,
+            systemMessageId: retryTarget.systemMessageId,
           });
         }
+        return "sent";
       } catch (retryError) {
         const deferred = await this.deferSystemReply(state, payload.text, retryError, kind);
         if (deferred) {
-          return;
+          return "deferred";
         }
         throw retryError;
       }
@@ -541,6 +555,7 @@ class StreamDelivery {
       contextToken: refreshedContextToken,
       provider: currentTarget.provider,
       systemKind: currentTarget.systemKind,
+      systemMessageId: currentTarget.systemMessageId,
     };
   }
 
@@ -595,6 +610,7 @@ class StreamDelivery {
       contextToken: target.contextToken,
       provider: target.provider,
       systemKind: target.systemKind,
+      systemMessageId: target.systemMessageId,
     };
     state.threadReplyTargetAttached = true;
   }
@@ -602,6 +618,22 @@ class StreamDelivery {
   markAllItemsSent(state) {
     for (const itemId of state.itemOrder) {
       state.sentItemIds.add(itemId);
+    }
+  }
+
+  recordSystemReplyOutcome(state, { action, outcome }) {
+    if (!this.onSystemReplyOutcome || state?.replyTarget?.systemKind !== "checkin") {
+      return;
+    }
+    try {
+      this.onSystemReplyOutcome({
+        runId: normalizeText(state.replyTarget.systemMessageId),
+        threadId: normalizeText(state.threadId),
+        action,
+        outcome,
+      });
+    } catch (error) {
+      console.error(`[cyberboss] failed to record proactive outcome thread=${state?.threadId || ""}: ${error.message}`);
     }
   }
 }
@@ -758,6 +790,7 @@ function normalizeReplyTarget(target) {
     contextToken: String(target.contextToken).trim(),
     provider: normalizeText(target.provider),
     systemKind: normalizeText(target.systemKind),
+    systemMessageId: normalizeText(target.systemMessageId),
   };
 }
 

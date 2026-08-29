@@ -67,6 +67,18 @@ class DeferredSystemReplyStore {
 
     return drained;
   }
+
+  countForSender(accountId, senderId, kind = "") {
+    this.load();
+    const normalizedAccountId = normalizeText(accountId);
+    const normalizedSenderId = normalizeText(senderId);
+    const normalizedKind = normalizeText(kind);
+    return this.state.replies.filter((reply) => (
+      reply.accountId === normalizedAccountId
+      && reply.senderId === normalizedSenderId
+      && (!normalizedKind || reply.kind === normalizedKind)
+    )).length;
+  }
 }
 
 function normalizeDeferredSystemReply(reply) {

@@ -98,7 +98,7 @@ Notes:
 - `/compact`
 - `/stop`
 - `/switch <threadId>`
-- `/checkin <min>-<max>`
+- `/checkin status|on|off|<min>-<max>`
 - `/chunk <number>`
 - `/yes`
 - `/always`

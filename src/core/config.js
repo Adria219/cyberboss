@@ -30,6 +30,8 @@ function readConfig() {
     systemMessageQueueFile: path.join(stateDir, "system-message-queue.json"),
     deferredSystemReplyQueueFile: path.join(stateDir, "deferred-system-replies.json"),
     checkinConfigFile: path.join(stateDir, "checkin-config.json"),
+    checkinRuntimeFile: path.join(stateDir, "checkin-runtime.json"),
+    checkinPollerLockFile: path.join(stateDir, "checkin-poller.lock"),
     checkinQuietHours: readTextEnv("CYBERBOSS_CHECKIN_QUIET_HOURS") || DEFAULT_CHECKIN_QUIET_HOURS,
     timelineScreenshotQueueFile: path.join(stateDir, "timeline-screenshot-queue.json"),
     projectToolContextFile: path.join(stateDir, "project-tool-runtime-context.json"),

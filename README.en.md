@@ -284,8 +284,8 @@ Switch the runtime with `CYBERBOSS_RUNTIME`. You do not need a different command
   Switch to a specific thread
 - `/stop`
   Stop the current running turn
-- `/checkin <min>-<max>`
-  Update the proactive random check-in range for the current project
+- `/checkin status|on|off|<min>-<max>`
+  Inspect, enable, disable, or reschedule proactive random check-ins
 - `/chunk <number>`
   Adjust the minimum merge size for short WeChat reply chunks
 - `/yes`
@@ -378,7 +378,11 @@ Common contents:
 - `deferred-system-replies.json`
   replies waiting for the next usable WeChat context token
 - `checkin-config.json`
-  saved proactive check-in range
+  saved proactive check-in switch and range
+- `checkin-runtime.json`
+  bounded scheduler state and the latest redacted delivery receipt; message bodies are not stored here
+- `checkin-poller.lock`
+  local single-scheduler lock, removed when the bridge exits normally
 - `timeline-screenshot-queue.json`
   screenshot job queue
 - `diary/`
@@ -461,6 +465,8 @@ Because the project is not published as an npm package yet. Clone the repo and r
 ### What exactly is `checkin`?
 
 `checkin` is the random wake-up mechanism. The system wakes the model at a random time and lets it decide whether to show up, stay silent, write data, or act.
+
+Use `/checkin on` and `/checkin off` to persistently control the scheduler. `/checkin status` shows the interval, masked target, next wake time, the latest action/outcome, and locally held proactive-note count. The poller stays dormant while disabled and a local lock prevents two bridge processes from scheduling duplicate wake-ups.
 
 ### Why set user name and gender before the first run?
 

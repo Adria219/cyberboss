@@ -8,7 +8,7 @@ const DEFERRED_PLAIN_REPLY_HEADER = "===== 上轮对话遗留内容 =====";
 const DEFERRED_SYSTEM_REPLY_HEADER = "===== 期间模型主动联系 =====";
 const CURRENT_REPLY_HEADER = "===== 本轮模型回复 =====";
 
-function createHarness({ sendText, getKnownContextTokens, runtimeId = "", onDeferredSystemReply, shouldHoldSystemReply } = {}) {
+function createHarness({ sendText, getKnownContextTokens, runtimeId = "", onDeferredSystemReply, onSystemReplyOutcome, shouldHoldSystemReply } = {}) {
   const sent = [];
   const channelAdapter = {
     async sendText(payload) {
@@ -38,6 +38,7 @@ function createHarness({ sendText, getKnownContextTokens, runtimeId = "", onDefe
     sessionStore,
     runtimeId,
     onDeferredSystemReply,
+    onSystemReplyOutcome,
     shouldHoldSystemReply,
   });
   return { sent, streamDelivery, bindingByThreadId };
@@ -89,9 +90,13 @@ test("system silent JSON is suppressed", async () => {
 
 test("system leave_note stores a local proactive note without sending", async () => {
   const deferred = [];
+  const outcomes = [];
   const { sent, streamDelivery } = createHarness({
     async onDeferredSystemReply(payload) {
       deferred.push(payload);
+    },
+    onSystemReplyOutcome(payload) {
+      outcomes.push(payload);
     },
   });
   streamDelivery.queueReplyTargetForThread("thread-note", {
@@ -99,6 +104,7 @@ test("system leave_note stores a local proactive note without sending", async ()
     contextToken: "ctx-note",
     provider: "system",
     systemKind: "checkin",
+    systemMessageId: "checkin-1",
   });
 
   await runCompletedTurn(streamDelivery, {
@@ -110,6 +116,12 @@ test("system leave_note stores a local proactive note without sending", async ()
 
   assert.deepEqual(sent, []);
   assert.equal(deferred.length, 1);
+  assert.deepEqual(outcomes, [{
+    runId: "checkin-1",
+    threadId: "thread-note",
+    action: "leave_note",
+    outcome: "held",
+  }]);
   assert.equal(deferred[0].text, "醒了再给你看。");
   assert.equal(deferred[0].kind, "proactive_note");
 });
@@ -127,6 +139,7 @@ test("proactive note storage failure drops the note fail-closed without sending"
     contextToken: "ctx-note",
     provider: "system",
     systemKind: "checkin",
+    systemMessageId: "checkin-1",
   });
 
   await streamDelivery.handleRuntimeEvent({

@@ -29,6 +29,7 @@ const {
   resolveQuietHours,
   resolveDefaultCheckinRange,
 } = require("./checkin-config-store");
+const { CheckinRuntimeStore } = require("./checkin-runtime-store");
 const { resolvePreferredSenderId, resolvePreferredWorkspaceRoot } = require("./default-targets");
 const { StreamDelivery } = require("./stream-delivery");
 const { ThreadStateStore } = require("./thread-state-store");
@@ -81,6 +82,9 @@ class CyberbossApp {
     this.systemMessageQueue = new SystemMessageQueueStore({ filePath: config.systemMessageQueueFile });
     this.deferredSystemReplyQueue = new DeferredSystemReplyStore({ filePath: config.deferredSystemReplyQueueFile });
     this.checkinConfigStore = new CheckinConfigStore({ filePath: config.checkinConfigFile });
+    this.checkinRuntimeStore = new CheckinRuntimeStore({
+      filePath: config.checkinRuntimeFile || path.join(config.stateDir || os.tmpdir(), "checkin-runtime.json"),
+    });
     this.timelineScreenshotQueue = new TimelineScreenshotQueueStore({ filePath: config.timelineScreenshotQueueFile });
     this.reminderQueue = new ReminderQueueStore({ filePath: config.reminderQueueFile });
     this.turnGateStore = new TurnGateStore();
@@ -94,10 +98,13 @@ class CyberbossApp {
       sessionStore: this.runtimeAdapter.getSessionStore(),
       runtimeId: this.runtimeAdapter.describe().id,
       onDeferredSystemReply: (payload) => this.deferSystemReply(payload),
+      onSystemReplyOutcome: (payload) => this.checkinRuntimeStore.completeRun(payload),
       shouldHoldSystemReply: ({ target }) => target?.systemKind === "checkin"
         && isWithinQuietHours(new Date(), this.checkinQuietHours),
     });
     this.pendingOperationByRunKey = new Map();
+    this.checkinPollerAbort = null;
+    this.checkinPollerPromise = null;
     this.runtimeEventChain = Promise.resolve();
     this.runtimeAdapter.onEvent((event) => {
       this.threadStateStore.applyRuntimeEvent(event);
@@ -157,15 +164,21 @@ class CyberbossApp {
       await this.ensureLocationServerStarted();
     }
     console.log("[cyberboss] bridge loop started; waiting for WeChat messages.");
-    if (this.config.startWithCheckin) {
-      console.log("[cyberboss] checkin: enabled");
-      void runSystemCheckinPoller(this.config).catch((error) => {
+    this.checkinPollerAbort = new AbortController();
+    const checkinEnabled = this.checkinConfigStore.getEnabled(this.config.startWithCheckin);
+    console.log(`[cyberboss] checkin: ${checkinEnabled ? "enabled" : "standby"}`);
+    this.checkinPollerPromise = runSystemCheckinPoller(this.config, {
+      signal: this.checkinPollerAbort.signal,
+    }).catch((error) => {
+      if (!this.checkinPollerAbort.signal.aborted) {
         console.error(`[cyberboss] checkin poller stopped: ${error.message}`);
-      });
-    }
+      }
+    });
 
     const shutdown = createShutdownController(async () => {
       this.clearPendingImageInboundTimers();
+      this.checkinPollerAbort?.abort();
+      await this.checkinPollerPromise?.catch(() => {});
       await this.closeLocationServer();
       await this.runtimeAdapter.close();
     });
@@ -474,6 +487,7 @@ class CyberbossApp {
         contextToken: prepared.contextToken,
         provider: prepared.provider,
         systemKind: prepared.systemKind,
+        systemMessageId: prepared.messageId,
       };
       if (turn.turnId) {
         this.streamDelivery.bindReplyTargetForTurn({
@@ -483,6 +497,12 @@ class CyberbossApp {
         });
       } else {
         this.streamDelivery.queueReplyTargetForThread(turn.threadId, replyTarget);
+      }
+      if (prepared.systemKind === "checkin") {
+        this.checkinRuntimeStore.markDispatched({
+          runId: prepared.messageId,
+          threadId: turn.threadId,
+        });
       }
       return true;
     } catch (error) {
@@ -1281,22 +1301,49 @@ class CyberbossApp {
   }
 
   async handleCheckinCommand(normalized, command) {
-    const rangeInput = normalizeCommandArgument(command.args);
-    if (!rangeInput) {
+    const input = normalizeCommandArgument(command.args);
+    const action = input.toLowerCase();
+    if (!input || action === "status") {
       const currentRange = this.checkinConfigStore.getRange(resolveDefaultCheckinRange());
+      const enabled = this.checkinConfigStore.getEnabled(Boolean(this.config?.startWithCheckin));
+      const runtime = this.checkinRuntimeStore.load();
+      const targetSenderId = runtime.senderId || normalized.senderId;
+      const heldNotes = this.deferredSystemReplyQueue.countForSender(
+        this.activeAccountId || "",
+        targetSenderId,
+        "proactive_note"
+      );
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `⏰ Current check-in interval is ${Math.round(currentRange.minIntervalMs / 60000)}-${Math.round(currentRange.maxIntervalMs / 60000)} minutes.`,
+        text: formatCheckinStatus({ enabled, range: currentRange, runtime, heldNotes }),
         contextToken: normalized.contextToken,
       });
       return;
     }
 
-    const parsedRange = parseCheckinRangeMinutes(rangeInput);
+    if (action === "on" || action === "off") {
+      const enabled = action === "on";
+      this.checkinConfigStore.setEnabled(enabled);
+      this.checkinRuntimeStore.setScheduler({
+        enabled,
+        pollerStatus: enabled ? "ready" : "disabled",
+        nextWakeAt: "",
+      });
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: enabled
+          ? "✅ 主动唤醒已开启；后台会在下一轮安排时间。"
+          : "⏸️ 主动唤醒已关闭；已安排但尚未触发的这一轮也不会发送。",
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    const parsedRange = parseCheckinRangeMinutes(input);
     if (!parsedRange) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "💡 Usage: /checkin <min>-<max>",
+        text: "💡 用法：/checkin status、/checkin on、/checkin off 或 /checkin <最短分钟>-<最长分钟>",
         contextToken: normalized.contextToken,
       });
       return;
@@ -2322,6 +2369,83 @@ function groupDeferredReplies(replies) {
     grouped.plain.push(normalizedText);
   }
   return grouped;
+}
+
+function formatCheckinStatus({ enabled, range, runtime, heldNotes }) {
+  const lastRun = runtime?.lastRun;
+  const lastResult = lastRun?.action && lastRun?.outcome
+    ? `${formatCheckinAction(lastRun.action)} / ${formatCheckinOutcome(lastRun.outcome)} · ${formatCheckinLocalTime(lastRun.completedAt || lastRun.queuedAt)}`
+    : "尚无完成记录";
+  return [
+    `⏰ 主动唤醒：${enabled ? "开启" : "关闭"}`,
+    `间隔：${Math.round(range.minIntervalMs / 60000)}-${Math.round(range.maxIntervalMs / 60000)} 分钟`,
+    `运行状态：${formatCheckinPollerStatus(runtime?.pollerStatus, runtime?.errorCode)}`,
+    `目标：${maskCheckinTarget(runtime?.senderId)}${runtime?.workspaceRoot ? ` · ${path.basename(runtime.workspaceRoot)}` : ""}`,
+    `下次：${runtime?.nextWakeAt ? formatCheckinLocalTime(runtime.nextWakeAt) : "尚未安排"}`,
+    `上次：${lastResult}`,
+    `未寄留言：${Number.isFinite(heldNotes) ? heldNotes : 0} 条`,
+  ].join("\n");
+}
+
+function formatCheckinPollerStatus(status, errorCode) {
+  const labels = {
+    disabled: "已关闭",
+    waiting: "等待唤醒",
+    queued: "已排队",
+    running: "正在处理",
+    ready: "待安排",
+    error: "异常",
+    lock_conflict: "已有调度器运行",
+  };
+  const errors = {
+    queue_busy: "上一条仍在队列",
+    target_unavailable: "目标暂不可用",
+    poller_already_running: "已有调度器运行",
+  };
+  const label = labels[String(status || "")] || "已关闭";
+  const detail = errors[String(errorCode || "")];
+  return detail ? `${label}（${detail}）` : label;
+}
+
+function formatCheckinAction(action) {
+  return ({
+    silent: "静默",
+    send_message: "发送消息",
+    leave_note: "留下信息",
+    invalid: "无效响应",
+  })[action] || "未知动作";
+}
+
+function formatCheckinOutcome(outcome) {
+  return ({
+    suppressed: "未打扰",
+    sent: "已送达",
+    held: "留在本地",
+    deferred: "等待补发",
+    dropped: "已丢弃",
+    rejected: "已拒绝",
+    failed: "失败",
+  })[outcome] || "未知结果";
+}
+
+function formatCheckinLocalTime(value) {
+  const date = new Date(String(value || ""));
+  if (Number.isNaN(date.getTime())) return "未知时间";
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date).replace(/\//g, "-");
+}
+
+function maskCheckinTarget(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "等待确定";
+  if (normalized.length <= 8) return normalized;
+  return `${normalized.slice(0, 4)}…${normalized.slice(-4)}`;
 }
 
 function formatWechatLocalTime(receivedAt) {

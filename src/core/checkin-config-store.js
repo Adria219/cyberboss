@@ -21,7 +21,7 @@ class CheckinConfigStore {
     try {
       const raw = fs.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
-      this.state = normalizePersistedRange(parsed) || {};
+      this.state = normalizePersistedState(parsed);
     } catch {
       this.state = {};
     }
@@ -38,9 +38,22 @@ class CheckinConfigStore {
 
   setRange(range) {
     const normalized = normalizeIntervalRange(range);
-    this.state = normalized;
+    this.load();
+    this.state = { ...this.state, ...normalized };
     this.save();
     return { ...normalized };
+  }
+
+  getEnabled(fallback = false) {
+    this.load();
+    return typeof this.state.enabled === "boolean" ? this.state.enabled : Boolean(fallback);
+  }
+
+  setEnabled(enabled) {
+    this.load();
+    this.state = { ...this.state, enabled: Boolean(enabled) };
+    this.save();
+    return this.state.enabled;
   }
 }
 
@@ -138,6 +151,17 @@ function normalizePersistedRange(value) {
   return {
     minIntervalMs,
     maxIntervalMs: Math.max(minIntervalMs, maxIntervalMs),
+  };
+}
+
+function normalizePersistedState(value) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  const range = normalizePersistedRange(value);
+  return {
+    ...(range || {}),
+    ...(typeof value.enabled === "boolean" ? { enabled: value.enabled } : {}),
   };
 }
 
