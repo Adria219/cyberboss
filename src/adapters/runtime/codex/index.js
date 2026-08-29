@@ -14,6 +14,8 @@ const { findModelByQuery } = require("./model-catalog");
 const { SessionStore } = require("./session-store");
 const { resolveCodexProjectToolMcpServerConfig } = require("./mcp-config");
 
+const WECHAT_THREAD_NAME = "CyberBoss 微信后台";
+
 function createCodexRuntimeAdapter(config) {
   const sessionStore = new SessionStore({ filePath: config.sessionsFile, runtimeId: "codex" });
   let client = null;
@@ -210,6 +212,7 @@ function createCodexRuntimeAdapter(config) {
         if (!threadId) {
           throw new Error("thread/start did not return a thread id");
         }
+        await setWechatThreadName(runtimeClient, threadId);
         sessionStore.setThreadIdForWorkspace(bindingKey, workspaceRoot, threadId, metadata);
         outboundText = buildOpeningTurnText(config, text);
       } else {
@@ -228,6 +231,7 @@ function createCodexRuntimeAdapter(config) {
           if (!threadId) {
             throw new Error("thread/start did not return a thread id");
           }
+          await setWechatThreadName(runtimeClient, threadId);
           sessionStore.setThreadIdForWorkspace(bindingKey, workspaceRoot, threadId, metadata);
           sessionStore.setRuntimeParamsForWorkspace(bindingKey, workspaceRoot, {
             model: desiredModel,
@@ -262,6 +266,16 @@ function normalizeText(value) {
 function runtimeParamsMatch(storedParams, desiredParams) {
   return normalizeText(storedParams?.model) === normalizeText(desiredParams?.model)
     && normalizeText(storedParams?.modelProvider) === normalizeText(desiredParams?.modelProvider);
+}
+
+async function setWechatThreadName(runtimeClient, threadId) {
+  if (typeof runtimeClient?.setThreadName !== "function") {
+    return;
+  }
+  await runtimeClient.setThreadName({
+    threadId,
+    name: WECHAT_THREAD_NAME,
+  }).catch(() => {});
 }
 
 function hasImageInputModality(model) {

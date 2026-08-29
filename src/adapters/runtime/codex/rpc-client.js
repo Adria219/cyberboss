@@ -58,6 +58,7 @@ class CodexRpcClient {
           env: { ...this.env },
           stdio: ["pipe", "pipe", "pipe"],
           shell: false,
+          windowsHide: true,
         });
         break;
       } catch (error) {
@@ -159,6 +160,18 @@ class CodexRpcClient {
 
   async startThread({ cwd, model = "", modelProvider = "" }) {
     return this.sendRequest("thread/start", buildStartThreadParams({ cwd, model, modelProvider }));
+  }
+
+  async setThreadName({ threadId, name }) {
+    const normalizedThreadId = normalizeNonEmptyString(threadId);
+    const normalizedName = normalizeNonEmptyString(name);
+    if (!normalizedThreadId || !normalizedName) {
+      throw new Error("thread/name/set requires a non-empty threadId and name");
+    }
+    return this.sendRequest("thread/name/set", {
+      threadId: normalizedThreadId,
+      name: normalizedName,
+    });
   }
 
   async resumeThread({ threadId, model = "", modelProvider = "" }) {
