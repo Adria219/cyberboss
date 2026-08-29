@@ -113,6 +113,7 @@ test("codex adapter lets configured env model override stored session model", as
   const originalMcp = require.cache[mcpConfigPath];
   const calls = {
     startThread: [],
+    setThreadName: [],
     resumeThread: [],
     sendUserMessage: [],
   };
@@ -134,6 +135,10 @@ test("codex adapter lets configured env model override stored session model", as
     async startThread(params) {
       calls.startThread.push(params);
       return { result: { thread: { id: "new-thread" } } };
+    }
+    async setThreadName(params) {
+      calls.setThreadName.push(params);
+      return { ok: true };
     }
     async resumeThread(params) {
       calls.resumeThread.push(params);
@@ -202,6 +207,10 @@ test("codex adapter lets configured env model override stored session model", as
     assert.equal(result.threadId, "new-thread");
     assert.deepEqual(calls.resumeThread, []);
     assert.equal(calls.startThread.length, 1);
+    assert.deepEqual(calls.setThreadName, [{
+      threadId: "new-thread",
+      name: "CyberBoss 微信后台",
+    }]);
     assert.equal(calls.startThread[0].model, "gemma4:26b");
     assert.equal(calls.startThread[0].modelProvider, "ollama");
     assert.equal(calls.sendUserMessage[0].model, "gemma4:26b");

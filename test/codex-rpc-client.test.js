@@ -26,6 +26,28 @@ test("codex rpc client uses turn/interrupt for stop requests", async () => {
   }]);
 });
 
+test("codex rpc client sets a user-visible thread name", async () => {
+  const client = new CodexRpcClient({ endpoint: "ws://127.0.0.1:8765" });
+  const calls = [];
+  client.sendRequest = async (method, params) => {
+    calls.push({ method, params });
+    return { ok: true };
+  };
+
+  await client.setThreadName({
+    threadId: "thread-1",
+    name: "CyberBoss 微信后台",
+  });
+
+  assert.deepEqual(calls, [{
+    method: "thread/name/set",
+    params: {
+      threadId: "thread-1",
+      name: "CyberBoss 微信后台",
+    },
+  }]);
+});
+
 test("codex rpc client sends image attachments as local images", async () => {
   const client = new CodexRpcClient({ endpoint: "ws://127.0.0.1:8765" });
   const calls = [];
