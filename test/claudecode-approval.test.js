@@ -1534,6 +1534,54 @@ test("handleStatusCommand shows codex context as unavailable when no context dat
   assert.match(sent[0], /📦 context: unavailable/);
 });
 
+test("handleEffortCommand saves a supported effort for only the current workspace", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-effort-command-"));
+  const store = new SessionStore({
+    filePath: path.join(tempDir, "sessions.json"),
+    runtimeId: "codex",
+  });
+  store.setAvailableModelCatalog([{
+    slug: "gpt-5.6-sol",
+    is_default: true,
+    supported_reasoning_efforts: ["low", "medium", "high", "xhigh"],
+    default_reasoning_effort: "low",
+  }]);
+  const sent = [];
+  const appLike = {
+    resolveWorkspaceRoot() {
+      return "/workspace-a";
+    },
+    runtimeAdapter: {
+      describe() {
+        return { id: "codex" };
+      },
+      getSessionStore() {
+        return store;
+      },
+    },
+    channelAdapter: {
+      async sendText(payload) {
+        sent.push(payload.text);
+      },
+    },
+  };
+  const normalized = {
+    workspaceId: "default",
+    accountId: "account-1",
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  };
+
+  await CyberbossApp.prototype.handleEffortCommand.call(appLike, normalized, {
+    args: "high",
+  });
+
+  const bindingKey = store.buildBindingKey(normalized);
+  assert.equal(store.getRuntimeParamsForWorkspace(bindingKey, "/workspace-a").effort, "high");
+  assert.equal(store.getRuntimeParamsForWorkspace(bindingKey, "/workspace-b").effort, undefined);
+  assert.match(sent[0], /effort: high/);
+});
+
 async function waitForFileText(filePath, pattern, timeoutMs = 1000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {

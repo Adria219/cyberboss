@@ -195,6 +195,7 @@ test("codex adapter lets configured env model override stored session model", as
     sessionStore.setRuntimeParamsForWorkspace("binding", workspaceRoot, {
       model: "gpt-oss:20b",
       modelProvider: "ollama",
+      effort: "high",
     });
 
     const result = await adapter.sendTextTurn({
@@ -215,9 +216,11 @@ test("codex adapter lets configured env model override stored session model", as
     assert.equal(calls.startThread[0].modelProvider, "ollama");
     assert.equal(calls.sendUserMessage[0].model, "gemma4:26b");
     assert.equal(calls.sendUserMessage[0].modelProvider, "ollama");
+    assert.equal(calls.sendUserMessage[0].effort, "high");
     assert.deepEqual(sessionStore.getRuntimeParamsForWorkspace("binding", workspaceRoot), {
       model: "gemma4:26b",
       modelProvider: "ollama",
+      effort: "high",
     });
     assert.equal(sessionStore.getThreadIdForWorkspace("binding", workspaceRoot), "new-thread");
 
@@ -236,6 +239,7 @@ test("codex adapter lets configured env model override stored session model", as
     cloudSessionStore.setRuntimeParamsForWorkspace("binding", workspaceRoot, {
       model: "gemma4:26b",
       modelProvider: "ollama",
+      effort: "high",
     });
 
     await cloudAdapter.refreshThreadInstructions({
@@ -243,6 +247,7 @@ test("codex adapter lets configured env model override stored session model", as
       workspaceRoot,
       model: "gemma4:26b",
       modelProvider: "ollama",
+      effort: "high",
     });
 
     assert.equal(calls.resumeThread.length, 1);
@@ -250,6 +255,7 @@ test("codex adapter lets configured env model override stored session model", as
     assert.equal(calls.resumeThread[0].modelProvider, "");
     assert.equal(calls.sendUserMessage[0].model, "");
     assert.equal(calls.sendUserMessage[0].modelProvider, "");
+    assert.equal(calls.sendUserMessage[0].effort, "high");
 
     calls.startThread.length = 0;
     calls.resumeThread.length = 0;
@@ -268,9 +274,11 @@ test("codex adapter lets configured env model override stored session model", as
     assert.equal(calls.startThread[0].modelProvider, "");
     assert.equal(calls.sendUserMessage[0].model, "");
     assert.equal(calls.sendUserMessage[0].modelProvider, "");
+    assert.equal(calls.sendUserMessage[0].effort, "high");
     assert.deepEqual(cloudSessionStore.getRuntimeParamsForWorkspace("binding", workspaceRoot), {
       model: "",
       modelProvider: "",
+      effort: "high",
     });
   } finally {
     delete require.cache[indexPath];
