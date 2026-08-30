@@ -326,6 +326,10 @@ Switch the runtime with `CYBERBOSS_RUNTIME`. You do not need a different command
   Show current model
 - `/model <id>`
   Switch model
+- `/effort`
+  Show the Codex reasoning effort for the current workspace
+- `/effort <level|default>`
+  Set or reset the Codex reasoning effort for the current workspace
 - `/star`
   Show the GitHub star guide inside WeChat
 - `/help`

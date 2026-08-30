@@ -183,6 +183,20 @@ const COMMAND_GROUPS = [
         status: "active",
       },
       {
+        action: "effort.inspect",
+        summary: "Inspect the current Codex reasoning effort",
+        terminal: [],
+        weixin: ["/effort"],
+        status: "active",
+      },
+      {
+        action: "effort.select",
+        summary: "Set the Codex reasoning effort for this workspace",
+        terminal: [],
+        weixin: ["/effort <level|default>"],
+        status: "active",
+      },
+      {
         action: "channel.send_file",
         summary: "Send a local file back to the current chat as an attachment",
         terminal: [],
@@ -334,6 +348,8 @@ function actionEmoji(action) {
     case "approval.reject_once": return "❌";
     case "model.inspect":
     case "model.select": return "🤖";
+    case "effort.inspect":
+    case "effort.select": return "🧠";
     case "app.help": return "❓";
     case "app.star": return "⭐️";
     default: return "•";

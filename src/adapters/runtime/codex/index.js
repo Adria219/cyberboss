@@ -158,7 +158,7 @@ function createCodexRuntimeAdapter(config) {
       await this.initialize();
       return runtimeClient.compactThread({ threadId });
     },
-    async refreshThreadInstructions({ threadId, workspaceRoot, model = "", modelProvider = "" }) {
+    async refreshThreadInstructions({ threadId, workspaceRoot, model = "", modelProvider = "", effort = "" }) {
       const runtimeClient = ensureClient();
       await this.initialize();
       const refreshText = buildInstructionRefreshText(config);
@@ -174,6 +174,7 @@ function createCodexRuntimeAdapter(config) {
         text: refreshText,
         model: desiredModel,
         modelProvider: configuredModelProvider,
+        effort: normalizeText(effort) || null,
         workspaceRoot,
       });
       const result = await completion;
@@ -182,7 +183,7 @@ function createCodexRuntimeAdapter(config) {
     async sendTextTurn(args) {
       return this.sendTurn(args);
     },
-    async sendTurn({ bindingKey, workspaceRoot, text, attachments = [], metadata = {}, model = "" }) {
+    async sendTurn({ bindingKey, workspaceRoot, text, attachments = [], metadata = {}, model = "", effort = "" }) {
       const runtimeClient = ensureClient();
       await this.initialize();
 
@@ -190,6 +191,7 @@ function createCodexRuntimeAdapter(config) {
       const storedParams = sessionStore.getRuntimeParamsForWorkspace(bindingKey, workspaceRoot);
       const desiredModel = resolveModel(model, storedParams);
       const desiredModelProvider = configuredModelProvider;
+      const desiredEffort = normalizeText(effort) || normalizeText(storedParams.effort);
       if (threadId && !runtimeParamsMatch(storedParams, {
         model: desiredModel,
         modelProvider: desiredModelProvider,
@@ -200,6 +202,7 @@ function createCodexRuntimeAdapter(config) {
       sessionStore.setRuntimeParamsForWorkspace(bindingKey, workspaceRoot, {
         model: desiredModel,
         modelProvider: desiredModelProvider,
+        effort: desiredEffort,
       });
       let outboundText = text;
       if (!threadId) {
@@ -236,6 +239,7 @@ function createCodexRuntimeAdapter(config) {
           sessionStore.setRuntimeParamsForWorkspace(bindingKey, workspaceRoot, {
             model: desiredModel,
             modelProvider: desiredModelProvider,
+            effort: desiredEffort,
           });
           outboundText = buildOpeningTurnText(config, text);
         });
@@ -247,6 +251,7 @@ function createCodexRuntimeAdapter(config) {
         attachments,
         model: desiredModel,
         modelProvider: desiredModelProvider,
+        effort: desiredEffort || null,
         workspaceRoot,
       });
       return {

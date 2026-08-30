@@ -7,7 +7,10 @@ const { DEFAULT_MIN_WEIXIN_CHUNK, MAX_MIN_WEIXIN_CHUNK } = require("../adapters/
 const { persistIncomingWeixinAttachments } = require("../adapters/channel/weixin/media-receive");
 const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
 const { createClaudeCodeRuntimeAdapter } = require("../adapters/runtime/claudecode");
-const { findModelByQuery } = require("../adapters/runtime/codex/model-catalog");
+const {
+  findModelByQuery,
+  resolveEffectiveModelForEffort,
+} = require("../adapters/runtime/codex/model-catalog");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const {
   assembleRuntimeTurnText,
@@ -490,7 +493,9 @@ class CyberbossApp {
     }).catch(() => {});
 
     try {
-      const model = this.runtimeAdapter.getSessionStore().getRuntimeParamsForWorkspace(bindingKey, workspaceRoot).model;
+      const runtimeParams = this.runtimeAdapter.getSessionStore().getRuntimeParamsForWorkspace(bindingKey, workspaceRoot);
+      const model = runtimeParams.model;
+      const effort = runtimeParams.effort;
       const runtimeTurn = await this.buildRuntimeTurn({ prepared, model });
       const sendTurn = typeof this.runtimeAdapter.sendTurn === "function"
         ? this.runtimeAdapter.sendTurn.bind(this.runtimeAdapter)
@@ -501,6 +506,7 @@ class CyberbossApp {
         text: runtimeTurn.text,
         attachments: runtimeTurn.attachments,
         model,
+        effort,
         metadata: {
           workspaceId: prepared.workspaceId,
           accountId: prepared.accountId,
@@ -1076,6 +1082,9 @@ class CyberbossApp {
       case "model":
         await this.handleModelCommand(normalized, command);
         return;
+      case "effort":
+        await this.handleEffortCommand(normalized, command);
+        return;
       case "star":
         await this.handleStarCommand(normalized);
         return;
@@ -1161,6 +1170,11 @@ class CyberbossApp {
     const storedModel = runtimeParams.model || "";
     const storedModelProvider = runtimeParams.modelProvider || this.runtimeAdapter.describe().modelProvider || "";
     const effectiveModel = this.runtimeAdapter.describe().model || storedModel;
+    const catalogModel = resolveEffectiveModelForEffort(
+      sessionStore.getAvailableModelCatalog?.()?.models,
+      effectiveModel,
+    );
+    const effectiveEffort = runtimeParams.effort || catalogModel?.defaultReasoningEffort || "(default)";
 
     const lines = [
       `📍 workspace: ${workspaceRoot}`,
@@ -1169,6 +1183,7 @@ class CyberbossApp {
       `🤖 runtime: ${runtimeName}`,
       `🤖 model: ${effectiveModel || "(default)"}`,
       `🤖 provider: ${storedModelProvider || "(default)"}`,
+      `🧠 effort: ${effectiveEffort}`,
     ];
     lines.push(formatContextStatusLine({
       runtimeName,
@@ -1231,6 +1246,7 @@ class CyberbossApp {
         workspaceRoot,
         model: runtimeParams.model,
         modelProvider: runtimeParams.modelProvider,
+        effort: runtimeParams.effort,
       });
     } catch (error) {
       await this.channelAdapter.sendText({
@@ -1545,6 +1561,64 @@ class CyberbossApp {
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
       text: `✅ Model switched\nworkspace: ${workspaceRoot}\nmodel: ${matched.model}`,
+      contextToken: normalized.contextToken,
+    });
+  }
+
+  async handleEffortCommand(normalized, command) {
+    const bindingKey = this.runtimeAdapter.getSessionStore().buildBindingKey({
+      workspaceId: normalized.workspaceId,
+      accountId: normalized.accountId,
+      senderId: normalized.senderId,
+    });
+    const workspaceRoot = this.resolveWorkspaceRoot(bindingKey);
+    const query = normalizeCommandArgument(command.args).toLowerCase();
+    const sessionStore = this.runtimeAdapter.getSessionStore();
+    const runtimeParams = sessionStore.getRuntimeParamsForWorkspace(bindingKey, workspaceRoot);
+    const catalog = sessionStore.getAvailableModelCatalog();
+    const configuredModel = this.runtimeAdapter.describe().model || runtimeParams.model;
+    const effectiveModel = resolveEffectiveModelForEffort(catalog?.models || [], configuredModel);
+    const supported = effectiveModel?.supportedReasoningEfforts || [];
+    const currentEffort = runtimeParams.effort || effectiveModel?.defaultReasoningEffort || "(default)";
+
+    if (!query) {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: [
+          `Current effort: ${currentEffort}`,
+          `Effective model: ${effectiveModel?.model || configuredModel || "(default)"}`,
+          `Supported efforts: ${supported.length ? supported.join(", ") : "(not available)"}`,
+        ].join("\n"),
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    if ((this.runtimeAdapter.describe().id || "runtime") !== "codex") {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: "❌ Reasoning effort is only available for the Codex runtime.",
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    if (query !== "default" && (!supported.length || !supported.some((item) => item.toLowerCase() === query))) {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: `❌ Effort not supported\n${query}\nSupported: ${supported.length ? supported.join(", ") : "model catalog unavailable"}`,
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    const nextEffort = query === "default" ? "" : query;
+    sessionStore.setRuntimeParamsForWorkspace(bindingKey, workspaceRoot, {
+      effort: nextEffort,
+    });
+    await this.channelAdapter.sendText({
+      userId: normalized.senderId,
+      text: `✅ Reasoning effort switched\nworkspace: ${workspaceRoot}\neffort: ${nextEffort || "(default)"}`,
       contextToken: normalized.contextToken,
     });
   }
